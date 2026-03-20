@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/koolenex.svg" width="120" alt="koolenex">
+</p>
+
 # koolenex
 
 Open-source KNX project tool. Import `.knxproj` files from ETS6,
