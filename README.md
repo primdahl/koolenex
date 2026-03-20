@@ -18,7 +18,6 @@ manage your installation, and interact with a live KNX bus.
 - **Manufacturers** — devices grouped by manufacturer and model
 - **Bus Monitor** — live telegram feed with decoded values, flow diagrams, and CSV export
 - **Bus Scan** — discover devices on the KNX bus
-- **Programming** — download application programs to devices (WIP)
 - **Settings** — theme (dark/light), DPT display format (numeric/formal/friendly), language
 - **Editable fields** — click-to-edit names, descriptions, comments, and installation hints with RTF rendering
 - **CSV export** — export devices, group addresses, group objects, topology, locations, and manufacturers
@@ -190,13 +189,6 @@ installations. It is very much under active development and has only
 been tested against two real-world `.knxproj` files — there are almost
 certainly incompatibilities with other projects, device types, and ETS
 configurations.
-
-The Programming feature and device image computation are works in
-progress and **must not be used on production KNX
-installations**. ETS6 from the KNX Association is the only official,
-supported tool for commissioning KNX devices. Using Koolenex to
-program devices may result in misconfigured or non-functional
-devices. Use at your own risk.
 
 ## Stack
 
