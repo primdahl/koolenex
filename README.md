@@ -1,6 +1,7 @@
-# Koolenex
+# koolenex
 
-Open-source KNX commissioning tool. Import `.knxproj` files from ETS6, manage your installation, and interact with a live KNX bus.
+Open-source KNX project tool. Import `.knxproj` files from ETS6,
+manage your installation, and interact with a live KNX bus.
 
 ## Features
 
@@ -24,31 +25,43 @@ Open-source KNX commissioning tool. Import `.knxproj` files from ETS6, manage yo
 
 ### Locations
 
-The building view shows your KNX installation organized by floors and rooms, matching the structure defined in ETS6. Expand any floor to see the devices assigned to each space.
+The building view shows your KNX installation organized by floors and
+rooms, matching the structure defined in ETS6. Expand any floor to see
+the devices assigned to each space.
 
 ![Locations view](images/buildings.png)
 
 ### Topology
 
-Devices displayed in their physical bus topology — areas, lines, and individual addresses. Shows manufacturer, model, serial number, location, and programming status at a glance.
+Devices displayed in their physical bus topology — areas, lines, and
+individual addresses. Shows manufacturer, model, serial number,
+location, and programming status at a glance.
 
 ![Topology view](images/topology.png)
 
 ### Device Detail
 
-Click any device to open its detail panel. The overview tab shows device metadata, editable description/comment/installation hints fields, and lists all other devices of the same type for quick comparison.
+Click any device to open its detail panel. The overview tab shows
+device metadata, editable description/comment/installation hints
+fields, and lists all other devices of the same type for quick
+comparison.
 
 ![Device detail](images/device.png)
 
 ### Device Parameters
 
-View and edit device parameters organized by channel, exactly as they appear in ETS6. The parameter tree on the left mirrors the ETS parameter page structure.
+View and edit device parameters organized by channel, exactly as they
+appear in ETS6. The parameter tree on the left mirrors the ETS
+parameter page structure.
 
 ![Parameters](images/parameters.png)
 
 ### Device Comparison
 
-Select two devices of the same type and compare their parameters side by side. Differences are highlighted, making it easy to spot configuration mismatches. The comparison also covers group objects and linked group addresses.
+Select two devices of the same type and compare their parameters side
+by side. Differences are highlighted, making it easy to spot
+configuration mismatches. The comparison also covers group objects and
+linked group addresses.
 
 ![Compare devices — parameters](images/compare%20two%20devices%20(first%20part).png)
 
@@ -56,7 +69,10 @@ Select two devices of the same type and compare their parameters side by side. D
 
 ### Connection Diagram
 
-A visual map showing how a device connects to the rest of the installation through its group addresses. Each group address fans out to the other devices that share it, revealing the communication topology.
+A visual map showing how a device connects to the rest of the
+installation through its group addresses. Each group address fans out
+to the other devices that share it, revealing the communication
+topology.
 
 ![Connection diagram — thermostat](images/connection%20diagram.png)
 
@@ -64,37 +80,50 @@ A visual map showing how a device connects to the rest of the installation throu
 
 ### Live Connection Diagram
 
-Watch telegrams flow through the connection diagram in real time. As devices communicate, animated dots trace the path from sender through the group address to all receivers, with speech bubbles showing the decoded value.
+Watch telegrams flow through the connection diagram in real time. As
+devices communicate, animated dots trace the path from sender through
+the group address to all receivers, with speech bubbles showing the
+decoded value.
 
 ![Live connections](images/live%20connections.gif)
 
 ### Bus Monitor
 
-Live telegram feed from the KNX bus with DPT-aware decoding, source/destination resolution, and device location display. The timeline at the bottom shows telegram flow between devices. Supports filtering, read/write operations, and CSV export.
+Live telegram feed from the KNX bus with DPT-aware decoding,
+source/destination resolution, and device location display. The
+timeline at the bottom shows telegram flow between devices. Supports
+filtering, read/write operations, and CSV export.
 
 ![Bus monitor](images/bus%20monitor.png)
 
 ### Per-Device Monitor
 
-Each device detail panel has its own monitor tab showing only the telegrams relevant to that device, filtered from the live bus feed.
+Each device detail panel has its own monitor tab showing only the
+telegrams relevant to that device, filtered from the live bus feed.
 
 ![Device monitor](images/bus%20monitor%20on%20device%20page.png)
 
 ### Per-Group Address Monitor
 
-Group addresses also have a dedicated monitor tab, showing every telegram sent to that address with decoded values and source device information.
+Group addresses also have a dedicated monitor tab, showing every
+telegram sent to that address with decoded values and source device
+information.
 
 ![Group address monitor](images/bus%20monitor%20on%20group%20address%20page.png)
 
 ### Manufacturers
 
-Devices grouped by manufacturer and model. Expand any model to see all instances in the installation with their addresses, locations, and status.
+Devices grouped by manufacturer and model. Expand any model to see all
+instances in the installation with their addresses, locations, and
+status.
 
 ![Manufacturers](images/manufacturer.png)
 
 ### Universal Search
 
-Search across devices, group addresses, manufacturers, and models from anywhere in the app. Results are grouped by type and clicking any result navigates directly to it.
+Search across devices, group addresses, manufacturers, and models from
+anywhere in the app. Results are grouped by type and clicking any
+result navigates directly to it.
 
 ![Universal search](images/universal%20search.png)
 
@@ -138,13 +167,23 @@ npm start
 
 ## KNX Bus Connection
 
-Enter your KNXnet/IP gateway address in **Settings**. Koolenex uses its own KNXnet/IP implementation with no external dependencies.
+Enter your KNXnet/IP gateway address in **Settings**. Koolenex uses
+its own KNXnet/IP implementation with no external dependencies.
 
 ## Disclaimer
 
-Koolenex is an experimental tool for exploring and monitoring KNX installations. It is very much under active development and has only been tested against two real-world `.knxproj` files — there are almost certainly incompatibilities with other projects, device types, and ETS configurations.
+Koolenex is an experimental tool for exploring and monitoring KNX
+installations. It is very much under active development and has only
+been tested against two real-world `.knxproj` files — there are almost
+certainly incompatibilities with other projects, device types, and ETS
+configurations.
 
-The Programming feature and device image computation are works in progress and **must not be used on production KNX installations**. ETS6 from the KNX Association is the only official, supported tool for commissioning KNX devices. Using Koolenex to program devices may result in misconfigured or non-functional devices. Use at your own risk.
+The Programming feature and device image computation are works in
+progress and **must not be used on production KNX
+installations**. ETS6 from the KNX Association is the only official,
+supported tool for commissioning KNX devices. Using Koolenex to
+program devices may result in misconfigured or non-functional
+devices. Use at your own risk.
 
 ## Stack
 
@@ -154,7 +193,7 @@ The Programming feature and device image computation are works in progress and *
 | Backend | Node.js + Express |
 | Database | SQLite via sql.js (in-memory, persisted to `koolenex.db`) |
 | Real-time | WebSocket |
-| Protocol | KNXnet/IP (built-in, no external dependencies) |
+| Protocol | KNXnet/IP |
 
 ## Project Structure
 
