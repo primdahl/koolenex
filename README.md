@@ -22,6 +22,7 @@ manage your installation, and interact with a live KNX bus.
 - **Settings** — theme (dark/light), DPT display format (numeric/formal/friendly), language
 - **Editable fields** — click-to-edit names, descriptions, comments, and installation hints with RTF rendering
 - **CSV export** — export devices, group addresses, group objects, topology, locations, and manufacturers
+- **Floor Plan** — upload floor plan images for each floor and drag devices onto them to visualize your installation layout
 - **Undo/redo** — Ctrl+Z to undo edits
 - **Global search** — find devices, group addresses, manufacturers, and models
 
@@ -114,6 +115,14 @@ telegram sent to that address with decoded values and source device
 information.
 
 ![Group address monitor](images/bus%20monitor%20on%20group%20address%20page.png)
+
+### Floor Plan
+
+Upload a floor plan image for each floor and drag devices from the
+sidebar onto their physical locations. Device positions are saved and
+persist across sessions. Tabs at the top switch between floors.
+
+![Floor plan](images/floorplan.png)
 
 ### Manufacturers
 
