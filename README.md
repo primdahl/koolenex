@@ -7,6 +7,13 @@
 Open-source KNX project tool. Import `.knxproj` files from ETS6,
 manage your installation, and interact with a live KNX bus.
 
+DISCLAIMER: THIS IS HIGHLY EXPERIMENTAL. PROBABLY FULL OF
+BUGS. PROBABLY FAILS HORRIBLY ON YOUR KNXPROJ FILE. PROCEED WITH
+CAUTION. DON'T USE FOR ANY REAL KNX PROJECT. CONNECTIONS WITH BUS
+MONITOR ARE NOT GUARANTEED TO WORK CORRECTLY. ANYTHING COULD HAPPEN.
+
+PROCEED AT YOUR OWN RISK.
+
 ## Features
 
 - **Project import** — parse ETS6 `.knxproj` files including password-protected projects
