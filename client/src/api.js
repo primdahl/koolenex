@@ -57,6 +57,10 @@ export const api = {
   listComObjects: (pid)        => req('GET',  `/projects/${pid}/comobjects`),
   updateComObjectGAs: (pid, coid, body) => req('PATCH', `/projects/${pid}/comobjects/${coid}/gas`, body),
 
+  // Catalog
+  getCatalog:    (pid) => req('GET', `/projects/${pid}/catalog`),
+  importKnxprod: (pid, formData) => req('POST', `/projects/${pid}/catalog/import`, formData, true),
+
   // Spaces
   updateSpace:    (pid, sid, body) => req('PUT', `/projects/${pid}/spaces/${sid}`, body),
 

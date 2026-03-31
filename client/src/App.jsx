@@ -7,7 +7,7 @@ import { initialState, reducer } from './state.js';
 import {
   IconLocations, IconTopology, IconGroupAddr, IconComObjects,
   IconMonitor, IconScan, IconProgramming, IconManufacturers, DeviceTypeIcon,
-  IconProject, IconFloorPlan,
+  IconProject, IconFloorPlan, IconCatalog,
 } from './icons.jsx';
 import { Spinner, Toast } from './primitives.jsx';
 import { GlobalSearch } from './search.jsx';
@@ -25,6 +25,7 @@ import { ProjectInfoView }    from './views/ProjectInfoView.jsx';
 import { LocationsView }      from './views/LocationsView.jsx';
 import { FloorPlanView }     from './views/FloorPlanView.jsx';
 import { BusScanView }        from './views/BusScanView.jsx';
+import { CatalogView }        from './views/CatalogView.jsx';
 import { PinDetailView }      from './detail/PinDetailView.jsx';
 import { GROUP_WTYPES }       from './state.js';
 
@@ -65,6 +66,7 @@ const VIEWS = [
   { id: 'groups',      Icon: IconGroupAddr,  label: 'Group Addresses' },
   { id: 'comobjects',     Icon: IconComObjects,    label: 'Group Objects' },
   { id: 'manufacturers', Icon: IconManufacturers, label: 'Manufacturers' },
+  { id: 'catalog',     Icon: IconCatalog,     label: 'Catalog' },
   { id: 'monitor',       Icon: IconMonitor,       label: 'Monitor' },
   { id: 'scan',        Icon: IconScan,       label: 'Scan' },
   { id: 'programming', Icon: IconProgramming,label: 'Programming', wip: true },
@@ -602,6 +604,7 @@ export default function App() {
           {state.view === 'floorplan'   && hasProject && <FloorPlanView   data={state.projectData} activeProjectId={state.activeProjectId} onUpdateDevice={handleUpdateDevice} jumpTo={state.floorplanJumpTo} onAddDevice={handleAddDevice} />}
           {state.view === 'monitor'     && <BusMonitorView telegrams={state.telegrams} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onClear={handleClearTelegrams} onWrite={handleWrite} data={state.projectData} onPin={handlePin} />}
           {state.view === 'scan'        && <BusScanView scan={state.scan} busConnected={state.busStatus.connected} projectData={state.projectData} activeProjectId={state.activeProjectId} dispatch={dispatch} onAddDevice={handleAddScannedDevice} />}
+          {state.view === 'catalog'     && hasProject && <CatalogView activeProjectId={state.activeProjectId} data={state.projectData} onAddDevice={handleAddDevice} onPin={handlePin} />}
           {state.view === 'programming' && hasProject && <ProgrammingView data={state.projectData} onDeviceStatus={handleDeviceStatus} />}
           {state.view === 'pin'         && hasProject && <PinDetailView pinKey={state.activePinKey} data={state.projectData} busStatus={state.busStatus} telegrams={state.telegrams} onWrite={handleWrite} activeProjectId={state.activeProjectId} onUpdateGA={handleUpdateGA} onUpdateDevice={handleUpdateDevice} onGroupJump={handleGAGroupJump} onAddDevice={handleAddDevice} onUpdateComObjectGAs={handleUpdateComObjectGAs} />}
         </div>

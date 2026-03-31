@@ -186,6 +186,41 @@ async function init() {
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_mode', '')`);
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_addr_map', '')`);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS catalog_sections (
+      id         TEXT NOT NULL,
+      project_id INTEGER NOT NULL,
+      name       TEXT NOT NULL DEFAULT '',
+      number     TEXT DEFAULT '',
+      parent_id  TEXT,
+      mfr_id     TEXT DEFAULT '',
+      manufacturer TEXT DEFAULT '',
+      PRIMARY KEY (project_id, id)
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS catalog_items (
+      id           TEXT NOT NULL,
+      project_id   INTEGER NOT NULL,
+      name         TEXT NOT NULL DEFAULT '',
+      number       TEXT DEFAULT '',
+      description  TEXT DEFAULT '',
+      section_id   TEXT DEFAULT '',
+      product_ref  TEXT DEFAULT '',
+      h2p_ref      TEXT DEFAULT '',
+      order_number TEXT DEFAULT '',
+      manufacturer TEXT DEFAULT '',
+      mfr_id       TEXT DEFAULT '',
+      model        TEXT DEFAULT '',
+      bus_current  INTEGER DEFAULT 0,
+      width_mm     REAL DEFAULT 0,
+      is_power_supply INTEGER DEFAULT 0,
+      is_coupler   INTEGER DEFAULT 0,
+      is_rail_mounted INTEGER DEFAULT 0,
+      PRIMARY KEY (project_id, id)
+    )
+  `);
+
   // ── ga_group_names: one row per main or middle group name ──────────────────
   // middle_g = -1 means it's a main-group name, otherwise it's a middle-group name.
   db.run(`

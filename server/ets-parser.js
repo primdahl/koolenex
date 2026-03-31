@@ -1015,6 +1015,72 @@ function parseKnxproj(buffer, password = null) {
     } catch (e) { console.error('[ETS] Hardware.xml:', e.message); }
   }
 
+  // ── Catalog lookup ──────────────────────────────────────────────────────────
+  const catalogSections = [];  // { id, name, number, parent_id (null for roots), mfr_id }
+  const catalogItems = [];     // { id, name, number, description, section_id, product_ref, h2p_ref, order_number, manufacturer }
+
+  for (const e of entries.filter(e => /M-[^/]+\/Catalog\.xml$/i.test(e.entryName))) {
+    const mfrId   = e.entryName.split('/')[0];
+    const mfrName = mfrById[mfrId] || mfrId;
+    try {
+      const cx = xmlParser.parse(e.getData().toString('utf8'));
+      for (const mNode of toArr(cx?.KNX?.ManufacturerData?.Manufacturer)) {
+        // Build translation map for catalog names
+        const catTrans = {};
+        for (const lang of toArr(mNode?.Languages?.Language).filter(l => /^en/i.test(a(l, 'Identifier')))) {
+          for (const tu of toArr(lang?.TranslationUnit)) {
+            for (const el of toArr(tu?.TranslationElement)) {
+              const refId = a(el, 'RefId');
+              if (!refId) continue;
+              for (const t of toArr(el.Translation)) {
+                if (a(t, 'Text')) { catTrans[refId] = a(t, 'Text'); break; }
+              }
+            }
+          }
+        }
+        const ct = id => catTrans[id] || '';
+
+        const walkSections = (sections, parentId) => {
+          for (const sec of toArr(sections)) {
+            const secId = a(sec, 'Id');
+            const secName = ct(secId) || a(sec, 'Name') || '';
+            const secNumber = a(sec, 'Number') || '';
+            catalogSections.push({ id: secId, name: secName, number: secNumber, parent_id: parentId, mfr_id: mfrId, manufacturer: mfrName });
+            // Items directly in this section
+            for (const item of toArr(sec.CatalogItem)) {
+              const itemId = a(item, 'Id');
+              const prodRef = a(item, 'ProductRefId') || '';
+              const h2pRef  = a(item, 'Hardware2ProgramRefId') || '';
+              const hw = hwByProd[prodRef] || hwByH2P[h2pRef] || {};
+              catalogItems.push({
+                id: itemId,
+                name: ct(itemId) || a(item, 'Name') || hw.model || '',
+                number: a(item, 'Number') || '',
+                description: a(item, 'VisibleDescription') || '',
+                section_id: secId,
+                product_ref: prodRef,
+                h2p_ref: h2pRef,
+                order_number: hw.orderNumber || a(item, 'VisibleDescription') || '',
+                manufacturer: mfrName,
+                mfr_id: mfrId,
+                model: hw.model || ct(itemId) || a(item, 'Name') || '',
+                bus_current: hw.busCurrent || 0,
+                width_mm: hw.widthMm || 0,
+                is_power_supply: hw.isPowerSupply || false,
+                is_coupler: hw.isCoupler || false,
+                is_rail_mounted: hw.isRailMounted || false,
+              });
+            }
+            // Recurse into child sections
+            walkSections(toArr(sec.CatalogSection), secId);
+          }
+        };
+        const catalog = mNode?.Catalog;
+        walkSections(toArr(catalog?.CatalogSection), null);
+      }
+    } catch (e) { console.error('[ETS] Catalog.xml:', e.message); }
+  }
+
   // ── Application program indexes ────────────────────────────────────────────
   // Keyed by "M-00FA_A-2504-10-C071" (appId without path/extension)
   const appByAppId = {};
@@ -1451,7 +1517,7 @@ function parseKnxproj(buffer, password = null) {
     try { thumbnail = jpgEntry.getData().toString('base64'); } catch (_) {}
   }
 
-  return { projectName, devices, groupAddresses, comObjects, links: uLinks, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml };
+  return { projectName, devices, groupAddresses, comObjects, links: uLinks, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

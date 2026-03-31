@@ -291,6 +291,8 @@ router.delete('/projects/:id', (req, res) => {
     }
     run('DELETE FROM bus_telegrams WHERE project_id=?', [pid]);
     run('DELETE FROM ga_group_names WHERE project_id=?', [pid]);
+    run('DELETE FROM catalog_sections WHERE project_id=?', [pid]);
+    run('DELETE FROM catalog_items WHERE project_id=?', [pid]);
     run('DELETE FROM audit_log WHERE project_id=?', [pid]);
     run('DELETE FROM spaces WHERE project_id=?', [pid]);
     run('DELETE FROM projects WHERE id=?', [pid]);
@@ -316,7 +318,7 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
     return res.status(422).json({ error: `Parse failed: ${err.message}` });
   }
 
-  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml } = parsed;
+  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems } = parsed;
 
   try {
     const projectId = db.transaction(({ run, all }) => {
@@ -385,6 +387,16 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
            co.ga_send||'', co.ga_receive||'']);
       }
 
+      // Insert catalog sections and items
+      for (const sec of (catalogSections || [])) {
+        run('INSERT OR REPLACE INTO catalog_sections (id,project_id,name,number,parent_id,mfr_id,manufacturer) VALUES (?,?,?,?,?,?,?)',
+          [sec.id, pid, sec.name, sec.number||'', sec.parent_id||null, sec.mfr_id||'', sec.manufacturer||'']);
+      }
+      for (const item of (catalogItems || [])) {
+        run('INSERT OR REPLACE INTO catalog_items (id,project_id,name,number,description,section_id,product_ref,h2p_ref,order_number,manufacturer,mfr_id,model,bus_current,width_mm,is_power_supply,is_coupler,is_rail_mounted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [item.id, pid, item.name, item.number||'', item.description||'', item.section_id||'', item.product_ref||'', item.h2p_ref||'', item.order_number||'', item.manufacturer||'', item.mfr_id||'', item.model||'', item.bus_current||0, item.width_mm||0, item.is_power_supply?1:0, item.is_coupler?1:0, item.is_rail_mounted?1:0]);
+      }
+
       return pid;
     });
 
@@ -438,7 +450,7 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
     return res.status(422).json({ error: `Parse failed: ${err.message}` });
   }
 
-  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml } = parsed;
+  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems } = parsed;
 
   try {
     db.transaction(({ run, all }) => {
@@ -447,6 +459,8 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
       run('DELETE FROM com_objects WHERE project_id=?', [pid]);
       run('DELETE FROM group_addresses WHERE project_id=?', [pid]);
       run('DELETE FROM devices WHERE project_id=?', [pid]);
+      run('DELETE FROM catalog_sections WHERE project_id=?', [pid]);
+      run('DELETE FROM catalog_items WHERE project_id=?', [pid]);
       run('DELETE FROM spaces WHERE project_id=?', [pid]);
       run('UPDATE projects SET name=?, file_name=?, thumbnail=?, project_info=?, updated_at=datetime(\'now\') WHERE id=?',
         [projectName, req.file.originalname, thumbnail || '', JSON.stringify(projectInfo || {}), pid]);
@@ -512,6 +526,16 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
           [pid, devId, co.object_number||0, co.channel||'', co.name||'', co.function_text||'',
            co.dpt||'', co.object_size||'', co.flags||'CW', co.direction||'both', co.ga_address||'',
            co.ga_send||'', co.ga_receive||'']);
+      }
+
+      // Re-insert catalog
+      for (const sec of (catalogSections || [])) {
+        run('INSERT OR REPLACE INTO catalog_sections (id,project_id,name,number,parent_id,mfr_id,manufacturer) VALUES (?,?,?,?,?,?,?)',
+          [sec.id, pid, sec.name, sec.number||'', sec.parent_id||null, sec.mfr_id||'', sec.manufacturer||'']);
+      }
+      for (const item of (catalogItems || [])) {
+        run('INSERT OR REPLACE INTO catalog_items (id,project_id,name,number,description,section_id,product_ref,h2p_ref,order_number,manufacturer,mfr_id,model,bus_current,width_mm,is_power_supply,is_coupler,is_rail_mounted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [item.id, pid, item.name, item.number||'', item.description||'', item.section_id||'', item.product_ref||'', item.h2p_ref||'', item.order_number||'', item.manufacturer||'', item.mfr_id||'', item.model||'', item.bus_current||0, item.width_mm||0, item.is_power_supply?1:0, item.is_coupler?1:0, item.is_rail_mounted?1:0]);
       }
 
     });
@@ -838,6 +862,70 @@ router.patch('/projects/:pid/comobjects/:coid/gas', (req, res) => {
     `ga_address: "${oldGAs}" → "${newGAs}" on "${co.name || co.object_number}"`);
   db.scheduleSave();
   res.json({ ...co, ga_address: gaAddr.join(' '), ga_send: gaSend, ga_receive: gaRecv });
+});
+
+// ── Catalog ──────────────────────────────────────────────────────────────────
+router.get('/projects/:id/catalog', (req, res) => {
+  const pid = +req.params.id;
+  const sections = db.all('SELECT * FROM catalog_sections WHERE project_id=? ORDER BY manufacturer, number, name', [pid]);
+  const items = db.all('SELECT * FROM catalog_items WHERE project_id=? ORDER BY manufacturer, name', [pid]);
+  // Mark which product_refs are in use by devices in this project
+  const usedRefs = new Set(db.all('SELECT product_ref FROM devices WHERE project_id=?', [pid]).map(r => r.product_ref).filter(Boolean));
+  res.json({ sections, items: items.map(i => ({ ...i, in_use: usedRefs.has(i.product_ref) })) });
+});
+
+// Import a standalone .knxprod file into a project's catalog
+router.post('/projects/:id/catalog/import', upload.single('file'), (req, res) => {
+  const pid = +req.params.id;
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  if (!req.file.originalname.toLowerCase().endsWith('.knxprod'))
+    return res.status(400).json({ error: 'File must be a .knxprod file' });
+  const project = db.get('SELECT * FROM projects WHERE id=?', [pid]);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  let parsed;
+  try {
+    parsed = parseKnxproj(req.file.buffer, null);
+  } catch (err) {
+    console.error('.knxprod parse error:', err);
+    return res.status(422).json({ error: `Parse failed: ${err.message}` });
+  }
+
+  const { catalogSections = [], catalogItems = [], paramModels, knxMasterXml } = parsed;
+
+  try {
+    db.transaction(({ run }) => {
+      for (const sec of catalogSections) {
+        run('INSERT OR REPLACE INTO catalog_sections (id,project_id,name,number,parent_id,mfr_id,manufacturer) VALUES (?,?,?,?,?,?,?)',
+          [sec.id, pid, sec.name, sec.number||'', sec.parent_id||null, sec.mfr_id||'', sec.manufacturer||'']);
+      }
+      for (const item of catalogItems) {
+        run('INSERT OR REPLACE INTO catalog_items (id,project_id,name,number,description,section_id,product_ref,h2p_ref,order_number,manufacturer,mfr_id,model,bus_current,width_mm,is_power_supply,is_coupler,is_rail_mounted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          [item.id, pid, item.name, item.number||'', item.description||'', item.section_id||'', item.product_ref||'', item.h2p_ref||'', item.order_number||'', item.manufacturer||'', item.mfr_id||'', item.model||'', item.bus_current||0, item.width_mm||0, item.is_power_supply?1:0, item.is_coupler?1:0, item.is_rail_mounted?1:0]);
+      }
+    });
+
+    // Save param models from .knxprod
+    if (paramModels) {
+      for (const [appId, model] of Object.entries(paramModels)) {
+        try {
+          const safe = appId.replace(/[^a-zA-Z0-9_\-]/g, '_');
+          fs.writeFileSync(path.join(APPS_DIR, safe + '.json'), JSON.stringify(model));
+        } catch (_) {}
+      }
+    }
+
+    db.audit(pid, 'import', 'catalog', req.file.originalname,
+      `Imported catalog: ${catalogSections.length} sections, ${catalogItems.length} items`);
+
+    const sections = db.all('SELECT * FROM catalog_sections WHERE project_id=? ORDER BY manufacturer, number, name', [pid]);
+    const items = db.all('SELECT * FROM catalog_items WHERE project_id=? ORDER BY manufacturer, name', [pid]);
+    const usedRefs = new Set(db.all('SELECT product_ref FROM devices WHERE project_id=?', [pid]).map(r => r.product_ref).filter(Boolean));
+    res.json({ ok: true, sections, items: items.map(i => ({ ...i, in_use: usedRefs.has(i.product_ref) })) });
+  } catch (err) {
+    console.error('.knxprod import error:', err);
+    res.status(500).json({ error: `Import failed: ${err.message}` });
+  }
 });
 
 // ── Audit Log ────────────────────────────────────────────────────────────────

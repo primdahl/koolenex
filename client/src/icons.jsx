@@ -195,6 +195,15 @@ export function IconFloorPlan({ size = 14 }) {
   </_SvgIcon>;
 }
 
+export function IconCatalog({ size = 14 }) {
+  return <_SvgIcon size={size}>
+    <rect x="2" y="1" width="10" height="12" rx="1" fill="none" stroke="currentColor" strokeWidth="1"/>
+    <line x1="4.5" y1="4" x2="9.5" y2="4" stroke="currentColor" strokeWidth="0.8"/>
+    <line x1="4.5" y1="6.5" x2="9.5" y2="6.5" stroke="currentColor" strokeWidth="0.8"/>
+    <line x1="4.5" y1="9" x2="7.5" y2="9" stroke="currentColor" strokeWidth="0.8"/>
+  </_SvgIcon>;
+}
+
 // Space/location type icons
 export function SpaceTypeIcon({ type, size = 13 }) {
   if (type === 'Building') return <IconLocations size={size} />;
