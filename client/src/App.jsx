@@ -26,6 +26,7 @@ import { LocationsView }      from './views/LocationsView.jsx';
 import { FloorPlanView }     from './views/FloorPlanView.jsx';
 import { BusScanView }        from './views/BusScanView.jsx';
 import { CatalogView }        from './views/CatalogView.jsx';
+import { PrintLabelsView }    from './views/PrintLabelsView.jsx';
 import { PinDetailView }      from './detail/PinDetailView.jsx';
 import { GROUP_WTYPES }       from './state.js';
 
@@ -596,7 +597,7 @@ export default function App() {
           {state.view === 'settings' && <SettingsView theme={theme} onThemeChange={handleThemeChange} dptMode={dptMode} onDptModeChange={handleDptModeChange} />}
           {state.view === 'project'     && hasProject && <ProjectInfoView project={state.projects.find(p => p.id === state.activeProjectId)} data={state.projectData} lang={i18nLang} onLangChange={handleLangChange} languages={i18nData.languages} busStatus={state.busStatus} onConnect={handleConnect} onConnectUsb={handleConnectUsb} onDisconnect={handleDisconnect} />}
           {state.view === 'topology'    && hasProject && <TopologyView    data={state.projectData} onPin={handlePin} busConnected={state.busStatus.connected} dispatch={dispatch} onAddDevice={handleAddDevice} />}
-          {state.view === 'devices'     && hasProject && <DevicesView     data={state.projectData} onDeviceStatus={handleDeviceStatus} jumpTo={state.deviceJumpTo} onPin={handlePin} onAddDevice={handleAddDevice} onUpdateDevice={handleUpdateDevice} />}
+          {state.view === 'devices'     && hasProject && <DevicesView     data={state.projectData} onDeviceStatus={handleDeviceStatus} jumpTo={state.deviceJumpTo} onPin={handlePin} onAddDevice={handleAddDevice} onUpdateDevice={handleUpdateDevice} dispatch={dispatch} />}
           {state.view === 'groups'      && hasProject && <GroupAddressesView data={state.projectData} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onWrite={handleWrite} onDeviceJump={handleDeviceJump} onPin={handlePin} onCreateGA={handleCreateGA} onDeleteGA={handleDeleteGA} onUpdateGA={handleUpdateGA} onRenameGAGroup={handleRenameGAGroup} jumpTo={state.gaJumpTo} />}
           {state.view === 'comobjects'     && hasProject && <ComObjectsView     data={state.projectData} onPin={handlePin} />}
           {state.view === 'manufacturers' && hasProject && <ManufacturersView  data={state.projectData} onAddDevice={handleAddDevice} dispatch={dispatch} />}
@@ -605,6 +606,7 @@ export default function App() {
           {state.view === 'monitor'     && <BusMonitorView telegrams={state.telegrams} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onClear={handleClearTelegrams} onWrite={handleWrite} data={state.projectData} onPin={handlePin} />}
           {state.view === 'scan'        && <BusScanView scan={state.scan} busConnected={state.busStatus.connected} projectData={state.projectData} activeProjectId={state.activeProjectId} dispatch={dispatch} onAddDevice={handleAddScannedDevice} />}
           {state.view === 'catalog'     && hasProject && <CatalogView activeProjectId={state.activeProjectId} data={state.projectData} onAddDevice={handleAddDevice} onPin={handlePin} jumpTo={state.catalogJumpTo} />}
+          {state.view === 'printlabels' && hasProject && <PrintLabelsView data={state.projectData} dispatch={dispatch} />}
           {state.view === 'programming' && hasProject && <ProgrammingView data={state.projectData} onDeviceStatus={handleDeviceStatus} />}
           {state.view === 'pin'         && hasProject && <PinDetailView pinKey={state.activePinKey} data={state.projectData} busStatus={state.busStatus} telegrams={state.telegrams} onWrite={handleWrite} activeProjectId={state.activeProjectId} onUpdateGA={handleUpdateGA} onUpdateDevice={handleUpdateDevice} onGroupJump={handleGAGroupJump} onAddDevice={handleAddDevice} onUpdateComObjectGAs={handleUpdateComObjectGAs} dispatch={dispatch} />}
         </div>

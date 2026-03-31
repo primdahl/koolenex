@@ -6,7 +6,7 @@ import { useColumns, ColumnPicker, dlCSV } from '../columns.jsx';
 import { RtfText } from '../rtf.jsx';
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice, onUpdateDevice }) {
+export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice, onUpdateDevice, dispatch }) {
   const C = useC();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState(() => { try { return JSON.parse(localStorage.getItem('knx-devices-sort')) || { col: 'individual_address', dir: 1 }; } catch { return { col: 'individual_address', dir: 1 }; } });
@@ -138,6 +138,7 @@ export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice, 
           <ColumnPicker key="cp" cols={cols} onChange={saveCols} C={C} />,
           <Btn key="grp" onClick={() => setGroupMode(g => !g)} color={groupMode ? C.accent : C.muted} bg={C.surface}>{groupMode ? '⊞ Grouped' : '⊞ Group'}</Btn>,
           <Btn key="csv" onClick={exportDevCSV} color={C.muted} bg={C.surface}>↓ CSV</Btn>,
+          ...(dispatch ? [<Btn key="print" onClick={() => dispatch({ type: 'SET_VIEW', view: 'printlabels' })} color={C.muted} bg={C.surface}>⎙ Labels</Btn>] : []),
           ...(onAddDevice ? [<Btn key="add" onClick={() => setShowAdd(true)} color={C.green} bg={C.surface}>+ Add</Btn>] : []),
         ]} />
         <div style={{ overflow: 'auto', flex: 1 }}>
