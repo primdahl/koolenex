@@ -57,7 +57,7 @@ function SpacePanel({ spaceId, data, C }) {
   );
 }
 
-function DeviceGroupPanel({ wtype, value, data, C, onAddDevice }) {
+function DeviceGroupPanel({ wtype, value, data, C, onAddDevice, dispatch }) {
   const pin = useContext(PinContext);
   const { devices = [], spaces = [] } = data;
   const { label } = GROUP_WTYPES[wtype];
@@ -90,6 +90,10 @@ function DeviceGroupPanel({ wtype, value, data, C, onAddDevice }) {
           {onAddDevice && (
             <Btn onClick={() => setShowAdd(true)} color={C.green} style={{ fontSize: 9, padding: '2px 8px' }}>+ Add</Btn>
           )}
+          {dispatch && (() => {
+            const mfr = wtype === 'manufacturer' ? value : matches[0]?.manufacturer;
+            return mfr ? <Btn onClick={() => dispatch({ type: 'CATALOG_JUMP', manufacturer: mfr })} color={C.accent} style={{ fontSize: 9, padding: '2px 8px' }}>Catalog</Btn> : null;
+          })()}
           {matches.length >= 2 && pin && <>
             <span style={{ color: C.border2 }}>|</span>
             <Btn onClick={selected.size === matches.length ? selectNone : selectAll} color={C.dim} style={{ fontSize: 9, padding: '2px 8px' }}>
@@ -351,7 +355,7 @@ function MultiComparePanel({ addrs, data, C }) {
   );
 }
 
-export function PinDetailView({ pinKey, data, busStatus, telegrams = [], onWrite, activeProjectId, onUpdateGA, onUpdateDevice, onGroupJump, onAddDevice, onUpdateComObjectGAs }) {
+export function PinDetailView({ pinKey, data, busStatus, telegrams = [], onWrite, activeProjectId, onUpdateGA, onUpdateDevice, onGroupJump, onAddDevice, onUpdateComObjectGAs, dispatch }) {
   const C = useC();
   const COLMAP = { actuator: C.actuator, sensor: C.sensor, router: C.router, generic: C.muted };
   const scrollRef = useRef(null);
@@ -381,7 +385,7 @@ export function PinDetailView({ pinKey, data, busStatus, telegrams = [], onWrite
   if (wtype === 'space') {
     content = <SpacePanel spaceId={address} data={data} C={C} />;
   } else if (GROUP_WTYPES[wtype]) {
-    content = <DeviceGroupPanel wtype={wtype} value={address} data={data} C={C} onAddDevice={onAddDevice} />;
+    content = <DeviceGroupPanel wtype={wtype} value={address} data={data} C={C} onAddDevice={onAddDevice} dispatch={dispatch} />;
   } else if (wtype === 'multicompare') {
     const addrs = address.split('|');
     content = <MultiComparePanel addrs={addrs} data={data} C={C} />;

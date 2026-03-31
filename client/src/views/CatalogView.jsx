@@ -4,7 +4,7 @@ import { Btn, Spinner, SearchBox, SectionHeader, Empty } from '../primitives.jsx
 import { api } from '../api.js';
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function CatalogView({ activeProjectId, data, onAddDevice, onPin }) {
+export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo }) {
   const C = useC();
   const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -21,6 +21,21 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin }) {
   };
 
   useEffect(() => { load(); }, [activeProjectId]);
+
+  // Handle jumpTo — expand the target manufacturer's first-level sections, collapse all others
+  useEffect(() => {
+    if (!jumpTo?.manufacturer || !catalog) return;
+    const { sections = [] } = catalog;
+    const newExpanded = {};
+    // Find root sections belonging to this manufacturer and expand them
+    for (const sec of sections) {
+      if (!sec.parent_id && sec.manufacturer === jumpTo.manufacturer) {
+        newExpanded[sec.id] = true;
+      }
+    }
+    setExpandedSections(newExpanded);
+    setSearch('');
+  }, [jumpTo, catalog]);
 
   const handleImportKnxprod = async (e) => {
     const file = e.target.files?.[0];

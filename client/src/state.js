@@ -56,6 +56,10 @@ export function reducer(state, action) {
       const nav = pushNav(state, { view: 'groups', activePinKey: null });
       return { ...state, view: 'groups', gaJumpTo: jt, ...nav };
     }
+    case 'CATALOG_JUMP': {
+      const nav = pushNav(state, { view: 'catalog', activePinKey: null });
+      return { ...state, view: 'catalog', catalogJumpTo: { manufacturer: action.manufacturer, ts: Date.now() }, ...nav };
+    }
     case 'FLOORPLAN_JUMP': {
       const nav = pushNav(state, { view: 'floorplan', activePinKey: null });
       return { ...state, view: 'floorplan', floorplanJumpTo: { spaceId: action.spaceId, ts: Date.now() }, ...nav };

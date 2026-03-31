@@ -7,7 +7,7 @@ import { dlCSV } from '../columns.jsx';
 
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function ManufacturersView({ data, onAddDevice }) {
+export function ManufacturersView({ data, onAddDevice, dispatch }) {
   const C = useC();
   const { devices, spaces = [], deviceGAMap = {} } = data;
   const [addDefaults, setAddDefaults] = useState(null);
@@ -82,6 +82,10 @@ export function ManufacturersView({ data, onAddDevice }) {
                 <span style={{ fontSize: 9, color: C.dim, width: 14, userSelect: 'none', flexShrink: 0 }}>{isOpen(mfrKey) ? '▾' : '▸'}</span>
                 <PinAddr address={mfr.name} wtype="manufacturer" style={{ color: C.amber, fontSize: 11, fontWeight: 600 }}>{mfr.name}</PinAddr>
                 <span style={{ color: C.dim, fontSize: 10 }}>· {mfrTotal} devices · {mfr.models.length} models</span>
+                {dispatch && <span onClick={e => { e.stopPropagation(); dispatch({ type: 'CATALOG_JUMP', manufacturer: mfr.name }); }}
+                  title="View in catalog"
+                  style={{ color: C.accent, fontSize: 9, marginLeft: 4, cursor: 'pointer', opacity: 0.7 }}
+                  className="bg">catalog</span>}
               </div>
               {isOpen(mfrKey) && mfr.models.map(mdl => {
                 const mdlKey = `m:${mfr.name}:${mdl.name}`;
