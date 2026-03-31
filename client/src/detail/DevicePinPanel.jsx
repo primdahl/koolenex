@@ -186,35 +186,7 @@ export function DevicePinPanel({ C, COLMAP, dev, devCOs, linkedGAs, spacePath, g
             onSave={onUpdateDevice ? (v) => onUpdateDevice(dev.id, { comment: v }) : null} />
           <EditableRtfField label="INSTALLATION HINTS" value={dev.installation_hints || ''} C={C}
             onSave={onUpdateDevice ? (v) => onUpdateDevice(dev.id, { installation_hints: v }) : null} />
-          {(() => {
-            const key = dev.order_number || dev.model;
-            if (!key || !allDevices) return null;
-            const similar = allDevices.filter(d =>
-              d.individual_address !== dev.individual_address &&
-              (dev.order_number ? d.order_number === dev.order_number : d.model === dev.model)
-            );
-            if (!similar.length) return null;
-            return (
-              <div style={{ marginTop: 4, marginBottom: 20 }}>
-                <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.08em', marginBottom: 8 }}>
-                  SAME DEVICE TYPE ({similar.length}) — {key}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {similar.map(d => (
-                    <div key={d.individual_address} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4 }}>
-                      <PinAddr address={d.individual_address} wtype="device" style={{ color: C.accent, fontFamily: 'monospace', fontSize: 11, flexShrink: 0 }} />
-                      <span style={{ color: C.muted, fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
-                      {d.space_id && <SpacePath spaceId={d.space_id} spaces={spaces} style={{ fontSize: 10, color: C.dim, flexShrink: 0 }} />}
-                      <Badge label={d.status?.toUpperCase()} color={STATUS_COLOR[d.status] || C.dim} />
-                      <span onClick={() => pin && pin('compare', `${dev.individual_address}|${d.individual_address}`)}
-                        style={{ fontSize: 9, padding: '2px 7px', borderRadius: 10, background: `${C.purple}18`, color: C.purple, border: `1px solid ${C.purple}30`, cursor: 'pointer', letterSpacing: '0.06em', flexShrink: 0 }}
-                        className="bg">COMPARE</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+          <SameDeviceSection dev={dev} allDevices={allDevices} spaces={spaces} C={C} pin={pin} />
         </>}
 
         {/* Group Addresses tab */}
@@ -500,6 +472,52 @@ function DuplicateDeviceModal({ dev, data, onAdd, onClose, C }) {
           <Btn onClick={onClose} color={C.dim}>Cancel</Btn>
           <Btn onClick={handleSubmit} color={C.green} disabled={addressExists}>Duplicate</Btn>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SameDeviceSection({ dev, allDevices, spaces, C, pin }) {
+  const [selected, setSelected] = useState(new Set());
+  const key = dev.order_number || dev.model;
+  if (!key || !allDevices) return null;
+  const similar = allDevices.filter(d =>
+    d.individual_address !== dev.individual_address &&
+    (dev.order_number ? d.order_number === dev.order_number : d.model === dev.model)
+  );
+  if (!similar.length) return null;
+  const toggleSelect = (addr) => setSelected(prev => { const n = new Set(prev); n.has(addr) ? n.delete(addr) : n.add(addr); return n; });
+  const compareSelected = () => {
+    if (selected.size < 1 || !pin) return;
+    pin('multicompare', [dev.individual_address, ...selected].join('|'));
+  };
+  return (
+    <div style={{ marginTop: 4, marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 10, color: C.dim, letterSpacing: '0.08em' }}>
+          SAME DEVICE TYPE ({similar.length}) — {key}
+        </span>
+        {selected.size >= 1 && pin && (
+          <Btn onClick={compareSelected} color={C.accent} style={{ fontSize: 9, padding: '2px 8px' }}>
+            Compare {selected.size + 1} Devices
+          </Btn>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {similar.map(d => (
+          <div key={d.individual_address} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: selected.has(d.individual_address) ? `${C.accent}10` : C.surface, border: `1px solid ${selected.has(d.individual_address) ? C.accent + '40' : C.border}`, borderRadius: 4 }}>
+            {pin && <input type="checkbox" checked={selected.has(d.individual_address)}
+              onChange={() => toggleSelect(d.individual_address)}
+              style={{ cursor: 'pointer', accentColor: C.accent, flexShrink: 0 }} />}
+            <PinAddr address={d.individual_address} wtype="device" style={{ color: C.accent, fontFamily: 'monospace', fontSize: 11, flexShrink: 0 }} />
+            <span style={{ color: C.muted, fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+            {d.space_id && <SpacePath spaceId={d.space_id} spaces={spaces} style={{ fontSize: 10, color: C.dim, flexShrink: 0 }} />}
+            <Badge label={d.status?.toUpperCase()} color={STATUS_COLOR[d.status] || C.dim} />
+            <span onClick={() => pin && pin('compare', `${dev.individual_address}|${d.individual_address}`)}
+              style={{ fontSize: 9, padding: '2px 7px', borderRadius: 10, background: `${C.purple}18`, color: C.purple, border: `1px solid ${C.purple}30`, cursor: 'pointer', letterSpacing: '0.06em', flexShrink: 0 }}
+              className="bg">COMPARE</span>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -514,7 +514,7 @@ export default function App() {
               </div>
               {state.windows.length > 0 && (
                 <div style={{ borderTop: `1px solid ${C.border}`, overflow: 'auto', flex: 1 }}>
-                  {[['device', 'DEVICES', C.accent], ['ga', 'GROUP ADDRESSES', C.purple], ['compare', 'COMPARISONS', C.purple],
+                  {[['device', 'DEVICES', C.accent], ['ga', 'GROUP ADDRESSES', C.purple], ['compare', 'COMPARISONS', C.purple], ['multicompare', 'MULTI-COMPARE', C.purple],
                     ['manufacturer', 'BY MANUFACTURER', C.amber], ['model', 'BY MODEL', C.amber], ['order_number', 'BY ORDER #', C.amber],
                     ['space', 'BY LOCATION', C.amber]].map(([wtype, label, col]) => {
                     const cmpPhys = (a, b) => { const p = s => s.split('.').map(Number); const [x,y]=[p(a),p(b)]; for(let i=0;i<3;i++){const d=(x[i]??0)-(y[i]??0);if(d)return d;}return 0; };
@@ -528,7 +528,11 @@ export default function App() {
                         <div style={{ padding: '6px 14px 2px', fontSize: 9, color: C.dim, letterSpacing: '0.08em' }}>{label}</div>
                         {group.map(w => {
                           let displayAddr = w.address, displayLabel = null;
-                          if (wtype === 'compare') {
+                          if (wtype === 'multicompare') {
+                            const addrs = w.address.split('|');
+                            displayAddr = `${addrs.length} devices`;
+                            displayLabel = addrs.join(', ');
+                          } else if (wtype === 'compare') {
                             const [a, b] = w.address.split('|');
                             const nA = state.projectData?.devices?.find(d => d.individual_address === a)?.name;
                             const nB = state.projectData?.devices?.find(d => d.individual_address === b)?.name;
