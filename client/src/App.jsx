@@ -307,6 +307,15 @@ export default function App() {
     }
   }, [state.activeProjectId, state.projectData, pushUndo]);
 
+  const handleRenameGAGroup = useCallback(async (main, middle, name) => {
+    if (!state.activeProjectId) return;
+    const midVal = middle !== null && middle !== undefined ? middle : undefined;
+    await api.renameGAGroup(state.activeProjectId, { main, middle: midVal, name });
+    // Update local state: patch all GAs in this group
+    const field = midVal !== undefined ? 'middle_group_name' : 'main_group_name';
+    dispatch({ type: 'RENAME_GA_GROUP', main, middle: midVal, field, name });
+  }, [state.activeProjectId]);
+
   const handleUpdateDevice = useCallback(async (deviceId, patch) => {
     if (!state.activeProjectId) return;
     const prev = state.projectData?.devices?.find(d => d.id === deviceId);
@@ -523,7 +532,7 @@ export default function App() {
           {state.view === 'project'     && hasProject && <ProjectInfoView project={state.projects.find(p => p.id === state.activeProjectId)} data={state.projectData} lang={i18nLang} onLangChange={handleLangChange} languages={i18nData.languages} busStatus={state.busStatus} onConnect={handleConnect} onConnectUsb={handleConnectUsb} onDisconnect={handleDisconnect} />}
           {state.view === 'topology'    && hasProject && <TopologyView    data={state.projectData} onPin={handlePin} busConnected={state.busStatus.connected} dispatch={dispatch} onAddDevice={handleAddDevice} />}
           {state.view === 'devices'     && hasProject && <DevicesView     data={state.projectData} onDeviceStatus={handleDeviceStatus} jumpTo={state.deviceJumpTo} onPin={handlePin} onAddDevice={handleAddDevice} />}
-          {state.view === 'groups'      && hasProject && <GroupAddressesView data={state.projectData} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onWrite={handleWrite} onDeviceJump={handleDeviceJump} onPin={handlePin} onCreateGA={handleCreateGA} onDeleteGA={handleDeleteGA} jumpTo={state.gaJumpTo} />}
+          {state.view === 'groups'      && hasProject && <GroupAddressesView data={state.projectData} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onWrite={handleWrite} onDeviceJump={handleDeviceJump} onPin={handlePin} onCreateGA={handleCreateGA} onDeleteGA={handleDeleteGA} onUpdateGA={handleUpdateGA} onRenameGAGroup={handleRenameGAGroup} jumpTo={state.gaJumpTo} />}
           {state.view === 'comobjects'     && hasProject && <ComObjectsView     data={state.projectData} onPin={handlePin} />}
           {state.view === 'manufacturers' && hasProject && <ManufacturersView  data={state.projectData} onAddDevice={handleAddDevice} />}
           {state.view === 'locations'   && hasProject && <LocationsView   data={state.projectData} onPin={handlePin} dispatch={dispatch} onAddDevice={handleAddDevice} />}

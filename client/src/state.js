@@ -110,6 +110,17 @@ export function reducer(state, action) {
       const gas = state.projectData.gas.map(g => g.id === action.id ? { ...g, ...action.patch } : g);
       return { ...state, projectData: { ...state.projectData, gas } };
     }
+    case 'RENAME_GA_GROUP': {
+      if (!state.projectData) return state;
+      const gas = state.projectData.gas.map(g => {
+        if (action.field === 'main_group_name' && g.main === action.main)
+          return { ...g, main_group_name: action.name };
+        if (action.field === 'middle_group_name' && g.main === action.main && g.middle === action.middle)
+          return { ...g, middle_group_name: action.name };
+        return g;
+      });
+      return { ...state, projectData: { ...state.projectData, gas } };
+    }
     case 'DELETE_GA': {
       if (!state.projectData) return state;
       const gas = state.projectData.gas.filter(g => g.id !== action.id);

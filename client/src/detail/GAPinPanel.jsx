@@ -80,18 +80,17 @@ export function GAPinPanel({ C, COLMAP, ga, linkedDevices, busConnected, gaTeleg
         {/* Overview tab */}
         {gaTab === 'overview' && <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
-            {[
-              ['Main Group',   `${ga.main} — ${ga.main_group_name || ''}`,    () => onGroupJump?.(ga.main, null)],
-              ['Middle Group', `${ga.middle} — ${ga.middle_group_name || ''}`, () => onGroupJump?.(ga.main, ga.middle)],
-              ['Sub',          `${ga.sub} — ${ga.name}`,                           null],
-            ].map(([k, v, onClick]) => (
-              <div key={k} onClick={onClick || undefined}
-                style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '8px 12px', cursor: onClick ? 'pointer' : 'default' }}>
-                <div style={{ fontSize: 9, color: C.dim, marginBottom: 3 }}>{k}</div>
-                <div className={onClick ? 'pa' : undefined} data-pin={onClick ? '1' : undefined}
-                  style={{ fontSize: 10, color: onClick ? C.purple : C.text, display: 'inline' }}>{v}</div>
-              </div>
-            ))}
+            <div onClick={() => onGroupJump?.(ga.main, null)}
+              style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '8px 12px', cursor: 'pointer' }}>
+              <div style={{ fontSize: 9, color: C.dim, marginBottom: 3 }}>Main Group</div>
+              <div className="pa" data-pin="1" style={{ fontSize: 10, color: C.purple, display: 'inline' }}>{ga.main} — {ga.main_group_name || ''}</div>
+            </div>
+            <div onClick={() => onGroupJump?.(ga.main, ga.middle)}
+              style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '8px 12px', cursor: 'pointer' }}>
+              <div style={{ fontSize: 9, color: C.dim, marginBottom: 3 }}>Middle Group</div>
+              <div className="pa" data-pin="1" style={{ fontSize: 10, color: C.purple, display: 'inline' }}>{ga.middle} — {ga.middle_group_name || ''}</div>
+            </div>
+            <SubNameCard ga={ga} C={C} onUpdateGA={onUpdateGA} />
           </div>
           <EditableRtfField label="DESCRIPTION" value={ga.description || ''} C={C}
             onSave={onUpdateGA ? (v) => onUpdateGA(ga.id, { description: v }) : null} />
@@ -141,6 +140,41 @@ export function GAPinPanel({ C, COLMAP, ga, linkedDevices, busConnected, gaTeleg
           <PinTelegramFeed telegrams={gaTelegrams} gaMap={gaMap} devMap={devMap} spaces={spaces} />
         )}
       </div>
+    </div>
+  );
+}
+
+function SubNameCard({ ga, C, onUpdateGA }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(ga.name);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setEditing(false); setName(ga.name); }, [ga.id]);
+
+  const save = async () => {
+    if (!name.trim() || !onUpdateGA) return;
+    setSaving(true);
+    try { await onUpdateGA(ga.id, { name: name.trim() }); setEditing(false); }
+    catch (_) {}
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '8px 12px' }}>
+      <div style={{ fontSize: 9, color: C.dim, marginBottom: 3 }}>Sub</div>
+      {editing ? (
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 10, color: C.text }}>{ga.sub} —</span>
+          <input value={name} onChange={e => setName(e.target.value)} autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+            style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize: 10, fontFamily: 'inherit', flex: 1, minWidth: 60 }} />
+          <Btn onClick={save} disabled={saving || !name.trim()} color={C.green}>{saving ? <Spinner /> : 'Save'}</Btn>
+          <Btn onClick={() => { setEditing(false); setName(ga.name); }} color={C.dim}>Cancel</Btn>
+        </div>
+      ) : (
+        <div onClick={onUpdateGA ? () => { setName(ga.name); setEditing(true); } : undefined}
+          style={{ fontSize: 10, color: C.text, cursor: onUpdateGA ? 'text' : 'default' }}
+          title={onUpdateGA ? 'Click to rename' : undefined}>{ga.sub} — {ga.name}</div>
+      )}
     </div>
   );
 }

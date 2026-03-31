@@ -186,6 +186,46 @@ async function init() {
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_mode', '')`);
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_addr_map', '')`);
 
+  // ── ga_group_names: one row per main or middle group name ──────────────────
+  // middle_g = -1 means it's a main-group name, otherwise it's a middle-group name.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS ga_group_names (
+      project_id INTEGER NOT NULL,
+      main_g     INTEGER NOT NULL,
+      middle_g   INTEGER NOT NULL DEFAULT -1,
+      name       TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (project_id, main_g, middle_g)
+    )
+  `);
+
+  // Migrate existing redundant columns into ga_group_names (one-time)
+  try {
+    const cols = db.exec("PRAGMA table_info(group_addresses)")[0];
+    const hasMainGN = cols && cols.values.some(r => r[1] === 'main_group_name');
+    if (hasMainGN) {
+      // Migrate main group names
+      const mains = all(
+        "SELECT DISTINCT project_id, main_g, main_group_name FROM group_addresses WHERE main_group_name != ''"
+      );
+      for (const r of mains) {
+        db.run(
+          "INSERT OR IGNORE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,-1,?)",
+          [r.project_id, r.main_g, r.main_group_name]
+        );
+      }
+      // Migrate middle group names
+      const mids = all(
+        "SELECT DISTINCT project_id, main_g, middle_g, middle_group_name FROM group_addresses WHERE middle_group_name != ''"
+      );
+      for (const r of mids) {
+        db.run(
+          "INSERT OR IGNORE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)",
+          [r.project_id, r.main_g, r.middle_g, r.middle_group_name]
+        );
+      }
+    }
+  } catch (_) {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS audit_log (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,14 +339,31 @@ function getProjectFull(projectId) {
     }
   }
 
+  // Build group-name lookup from ga_group_names table
+  const groupNames = all(
+    'SELECT main_g, middle_g, name FROM ga_group_names WHERE project_id=?',
+    [projectId]
+  );
+  const mainNameMap = {};   // main_g → name
+  const midNameMap = {};    // "main_g/middle_g" → name
+  for (const gn of groupNames) {
+    if (gn.middle_g === -1) mainNameMap[gn.main_g] = gn.name;
+    else midNameMap[`${gn.main_g}/${gn.middle_g}`] = gn.name;
+  }
+
   // Normalise column names for GAs
-  const normGas = gas.map(g => ({
-    ...g,
-    main:   g.main_g   ?? g.main   ?? 0,
-    middle: g.middle_g ?? g.middle ?? 0,
-    sub:    g.sub_g    ?? g.sub    ?? 0,
-    devices: gaDeviceMap[g.address] || [],
-  }));
+  const normGas = gas.map(g => {
+    const main   = g.main_g   ?? g.main   ?? 0;
+    const middle = g.middle_g ?? g.middle ?? 0;
+    return {
+      ...g,
+      main, middle,
+      sub:    g.sub_g ?? g.sub ?? 0,
+      main_group_name:   mainNameMap[main] || '',
+      middle_group_name: midNameMap[`${main}/${middle}`] || '',
+      devices: gaDeviceMap[g.address] || [],
+    };
+  });
 
   const spaces = all(
     'SELECT * FROM spaces WHERE project_id=? ORDER BY id',

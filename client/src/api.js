@@ -50,6 +50,7 @@ export const api = {
   listGAs:        (pid)        => req('GET',  `/projects/${pid}/gas`),
   createGA:       (pid, body)  => req('POST', `/projects/${pid}/gas`, body),
   updateGA:       (pid, gid, body) => req('PUT', `/projects/${pid}/gas/${gid}`, body),
+  renameGAGroup:  (pid, body)  => req('PATCH', `/projects/${pid}/gas/group-name`, body),
   deleteGA:       (pid, gid)   => req('DELETE', `/projects/${pid}/gas/${gid}`),
 
   // Com Objects

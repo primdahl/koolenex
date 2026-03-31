@@ -290,6 +290,8 @@ router.delete('/projects/:id', (req, res) => {
       run(`DELETE FROM group_addresses WHERE project_id=?`, [pid]);
     }
     run('DELETE FROM bus_telegrams WHERE project_id=?', [pid]);
+    run('DELETE FROM ga_group_names WHERE project_id=?', [pid]);
+    run('DELETE FROM audit_log WHERE project_id=?', [pid]);
     run('DELETE FROM spaces WHERE project_id=?', [pid]);
     run('DELETE FROM projects WHERE id=?', [pid]);
   });
@@ -356,12 +358,20 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
       for (const g of groupAddresses) {
         const { lastInsertRowid } = run(`
           INSERT OR REPLACE INTO group_addresses
-          (project_id,address,name,dpt,comment,description,main_group_name,middle_group_name,main_g,middle_g,sub_g)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          (project_id,address,name,dpt,comment,description,main_g,middle_g,sub_g)
+          VALUES (?,?,?,?,?,?,?,?,?)`,
           [pid, g.address, g.name, g.dpt||'', g.comment||'', g.description||'',
-           g.mainGroupName||'', g.middleGroupName||'',
            g.main||0, g.middle||0, g.sub||0]);
         gaIdMap[g.address] = lastInsertRowid;
+        // Store group names in the dedicated table
+        if (g.mainGroupName) {
+          run('INSERT OR REPLACE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,-1,?)',
+            [pid, g.main||0, g.mainGroupName]);
+        }
+        if (g.middleGroupName) {
+          run('INSERT OR REPLACE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)',
+            [pid, g.main||0, g.middle||0, g.middleGroupName]);
+        }
       }
 
       for (const co of comObjects) {
@@ -472,16 +482,24 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
       }
 
       // Re-insert GAs
+      run('DELETE FROM ga_group_names WHERE project_id=?', [pid]);
       const gaIdMap = {};
       for (const g of groupAddresses) {
         const { lastInsertRowid } = run(`
           INSERT INTO group_addresses
-          (project_id,address,name,dpt,comment,description,main_group_name,middle_group_name,main_g,middle_g,sub_g)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          (project_id,address,name,dpt,comment,description,main_g,middle_g,sub_g)
+          VALUES (?,?,?,?,?,?,?,?,?)`,
           [pid, g.address, g.name, g.dpt||'', g.comment||'', g.description||'',
-           g.mainGroupName||'', g.middleGroupName||'',
            g.main||0, g.middle||0, g.sub||0]);
         gaIdMap[g.address] = lastInsertRowid;
+        if (g.mainGroupName) {
+          run('INSERT OR REPLACE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,-1,?)',
+            [pid, g.main||0, g.mainGroupName]);
+        }
+        if (g.middleGroupName) {
+          run('INSERT OR REPLACE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)',
+            [pid, g.main||0, g.middle||0, g.middleGroupName]);
+        }
       }
 
       // Re-insert com objects
@@ -671,11 +689,23 @@ router.get('/projects/:id/gas', (req, res) => {
     }
   }
 
-  res.json(gas.map(g => ({
-    ...g,
-    main: g.main_g || 0, middle: g.middle_g || 0, sub: g.sub_g ?? null,
-    devices: gaDeviceMap[g.address] || [],
-  })));
+  // Attach group names from dedicated table
+  const groupNames = db.all('SELECT main_g, middle_g, name FROM ga_group_names WHERE project_id=?', [pid]);
+  const mainNameMap = {}, midNameMap = {};
+  for (const gn of groupNames) {
+    if (gn.middle_g === -1) mainNameMap[gn.main_g] = gn.name;
+    else midNameMap[`${gn.main_g}/${gn.middle_g}`] = gn.name;
+  }
+
+  res.json(gas.map(g => {
+    const main = g.main_g || 0, middle = g.middle_g || 0;
+    return {
+      ...g, main, middle, sub: g.sub_g ?? null,
+      main_group_name: mainNameMap[main] || '',
+      middle_group_name: midNameMap[`${main}/${middle}`] || '',
+      devices: gaDeviceMap[g.address] || [],
+    };
+  }));
 });
 
 router.post('/projects/:id/gas', (req, res) => {
@@ -684,11 +714,15 @@ router.post('/projects/:id/gas', (req, res) => {
   const is2level = parts.length === 2;
   const [m, mi, s] = is2level ? [+parts[0], +parts[1], null]
     : parts.length === 3 ? parts.map(Number) : [0, 0, 0];
-  const mgName = is2level ? (b.name || b.address) : null;
   const { lastInsertRowid } = db.run(
-    'INSERT OR REPLACE INTO group_addresses (project_id,address,name,dpt,main_g,middle_g,sub_g,middle_group_name) VALUES (?,?,?,?,?,?,?,?)',
-    [pid, b.address, b.name||b.address, b.dpt||'', m, mi, s, mgName]
+    'INSERT OR REPLACE INTO group_addresses (project_id,address,name,dpt,main_g,middle_g,sub_g) VALUES (?,?,?,?,?,?,?)',
+    [pid, b.address, b.name||b.address, b.dpt||'', m, mi, s]
   );
+  // For 2-level addresses, store middle group name
+  if (is2level) {
+    db.run('INSERT OR REPLACE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)',
+      [pid, m, mi, b.name || b.address]);
+  }
   db.audit(pid, 'create', 'group_address', b.address, `Created group address "${b.name || b.address}"`);
   db.scheduleSave();
   res.json(db.get('SELECT * FROM group_addresses WHERE id=?', [lastInsertRowid]));
@@ -710,6 +744,26 @@ router.put('/projects/:pid/gas/:gid', (req, res) => {
   vals.push(+gid);
   db.run(`UPDATE group_addresses SET ${sets.join(', ')} WHERE id=?`, vals);
   db.audit(+pid, 'update', 'group_address', oldGA.address || gid, diffs.join('; '));
+  db.scheduleSave();
+  res.json({ ok: true });
+});
+
+// Rename a main or middle group
+router.patch('/projects/:pid/gas/group-name', (req, res) => {
+  const pid = +req.params.pid;
+  const { main, middle, name } = req.body;
+  if (name === undefined) return res.status(400).json({ error: 'name required' });
+  if (main === undefined) return res.status(400).json({ error: 'main required' });
+
+  const midKey = (middle !== undefined && middle !== null) ? middle : -1;
+  const old = db.get('SELECT name FROM ga_group_names WHERE project_id=? AND main_g=? AND middle_g=?', [pid, main, midKey]);
+  db.run(
+    'INSERT OR REPLACE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)',
+    [pid, main, midKey, name]
+  );
+  const label = midKey === -1 ? `${main}` : `${main}/${middle}`;
+  const field = midKey === -1 ? 'main_group_name' : 'middle_group_name';
+  db.audit(pid, 'update', 'group_name', label, `${field}: "${old?.name ?? ''}" → "${name}"`);
   db.scheduleSave();
   res.json({ ok: true });
 });
