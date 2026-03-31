@@ -186,6 +186,19 @@ async function init() {
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_mode', '')`);
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_addr_map', '')`);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      timestamp  TEXT DEFAULT (datetime('now','localtime')),
+      action     TEXT NOT NULL,
+      entity     TEXT NOT NULL,
+      entity_id  TEXT DEFAULT '',
+      detail     TEXT DEFAULT ''
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id, timestamp)`);
+
   save();
 }
 
@@ -303,4 +316,21 @@ function getProjectFull(projectId) {
   return { project, devices, gas: normGas, comObjects, deviceGAMap, gaDeviceMap, spaces };
 }
 
-module.exports = { init, save, scheduleSave, all, get, run, transaction, getProjectFull };
+/**
+ * Record an audit log entry.
+ * @param {number} projectId
+ * @param {string} action   - e.g. 'create', 'update', 'delete', 'import'
+ * @param {string} entity   - e.g. 'device', 'group_address', 'com_object', 'project', 'param_values'
+ * @param {string} entityId - human-readable identifier (address, name, etc.)
+ * @param {string} detail   - free-text description of what changed
+ */
+function audit(projectId, action, entity, entityId, detail) {
+  try {
+    db.run(
+      'INSERT INTO audit_log (project_id, action, entity, entity_id, detail) VALUES (?,?,?,?,?)',
+      [projectId, action, entity, entityId || '', detail || '']
+    );
+  } catch (_) { /* never let audit logging break the main operation */ }
+}
+
+module.exports = { init, save, scheduleSave, all, get, run, transaction, getProjectFull, audit };

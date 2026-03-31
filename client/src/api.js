@@ -56,6 +56,10 @@ export const api = {
   listComObjects: (pid)        => req('GET',  `/projects/${pid}/comobjects`),
   updateComObjectGAs: (pid, coid, body) => req('PATCH', `/projects/${pid}/comobjects/${coid}/gas`, body),
 
+  // Audit Log
+  getAuditLog:    (pid, limit) => req('GET', `/projects/${pid}/audit-log?limit=${limit||500}`),
+  auditLogCsvUrl: (pid) => `${BASE}/projects/${pid}/audit-log/csv`,
+
   // Telegrams
   listTelegrams:  (pid, limit) => req('GET',  `/projects/${pid}/telegrams?limit=${limit||200}`),
   clearTelegrams: (pid)        => req('DELETE', `/projects/${pid}/telegrams`),

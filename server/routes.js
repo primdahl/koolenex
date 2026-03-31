@@ -256,6 +256,7 @@ router.post('/projects', (req, res) => {
   const { name } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'name required' });
   const { lastInsertRowid } = db.run('INSERT INTO projects (name) VALUES (?)', [name.trim()]);
+  db.audit(lastInsertRowid, 'create', 'project', name.trim(), 'Created project');
   db.scheduleSave();
   res.json(db.get('SELECT * FROM projects WHERE id=?', [lastInsertRowid]));
 });
@@ -268,7 +269,9 @@ router.get('/projects/:id', (req, res) => {
 
 router.put('/projects/:id', (req, res) => {
   const { name } = req.body;
+  const oldProj = db.get('SELECT name FROM projects WHERE id=?', [+req.params.id]);
   db.run("UPDATE projects SET name=?, updated_at=datetime('now') WHERE id=?", [name, +req.params.id]);
+  db.audit(+req.params.id, 'update', 'project', name, `name: "${oldProj?.name ?? ''}" → "${name}"`);
   db.scheduleSave();
   res.json(db.get('SELECT * FROM projects WHERE id=?', [+req.params.id]));
 });
@@ -388,6 +391,8 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
     }
     if (knxMasterXml) saveMasterXml(projectId, knxMasterXml);
 
+    db.audit(projectId, 'import', 'project', req.file.originalname,
+      `Imported ${devices.length} devices, ${groupAddresses.length} group addresses, ${comObjects.length} com objects`);
 
     res.json({
       ok: true, projectId,
@@ -506,7 +511,8 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
     }
     if (knxMasterXml) saveMasterXml(pid, knxMasterXml);
 
-
+    db.audit(pid, 'reimport', 'project', req.file.originalname,
+      `Reimported ${devices.length} devices, ${groupAddresses.length} group addresses, ${comObjects.length} com objects`);
 
     res.json({
       ok: true, projectId: pid,
@@ -536,6 +542,7 @@ router.post('/projects/:id/devices', (req, res) => {
      b.order_number||'', b.serial_number||'', b.product_ref||'',
      b.area||1, b.line||1, b.device_type||'generic', 'unassigned', '','','','',
      b.space_id||null, b.medium||'TP', b.area_name||'', b.line_name||'']);
+  db.audit(pid, 'create', 'device', b.individual_address, `Created device "${b.name || b.individual_address}"`);
   db.scheduleSave();
   res.json(db.get('SELECT * FROM devices WHERE id=?', [lastInsertRowid]));
 });
@@ -544,19 +551,21 @@ router.put('/projects/:pid/devices/:did', (req, res) => {
   const { pid, did } = req.params;
   const b = req.body;
   if (b.name !== undefined && !b.name?.trim()) return res.status(400).json({ error: 'name required' });
-  const d = db.get('SELECT id FROM devices WHERE id=? AND project_id=?', [+did, +pid]);
-  if (!d) return res.status(404).json({ error: 'Not found' });
-  const sets = [], vals = [];
-  if (b.name !== undefined)              { sets.push('name=?');              vals.push(b.name.trim()); }
-  if (b.device_type !== undefined)       { sets.push('device_type=?');       vals.push(b.device_type || 'generic'); }
-  if (b.description !== undefined)       { sets.push('description=?');       vals.push(b.description); }
-  if (b.comment !== undefined)           { sets.push('comment=?');           vals.push(b.comment); }
-  if (b.installation_hints !== undefined){ sets.push('installation_hints=?');vals.push(b.installation_hints); }
+  const old = db.get('SELECT * FROM devices WHERE id=? AND project_id=?', [+did, +pid]);
+  if (!old) return res.status(404).json({ error: 'Not found' });
+  const sets = [], vals = [], diffs = [];
+  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  if (b.name !== undefined)              track('name', b.name.trim());
+  if (b.device_type !== undefined)       track('device_type', b.device_type || 'generic');
+  if (b.description !== undefined)       track('description', b.description);
+  if (b.comment !== undefined)           track('comment', b.comment);
+  if (b.installation_hints !== undefined) track('installation_hints', b.installation_hints);
   if (b.floor_x !== undefined) { sets.push('floor_x=?'); vals.push(b.floor_x); }
   if (b.floor_y !== undefined) { sets.push('floor_y=?'); vals.push(b.floor_y); }
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
   vals.push(+did);
   db.run(`UPDATE devices SET ${sets.join(', ')} WHERE id=?`, vals);
+  db.audit(+pid, 'update', 'device', old.individual_address || did, diffs.join('; ') || 'Updated position');
   db.scheduleSave();
   res.json({ ok: true });
 });
@@ -594,15 +603,20 @@ router.delete('/projects/:pid/floor-plan/:spaceId', (req, res) => {
 });
 
 router.patch('/projects/:pid/devices/:did/status', (req, res) => {
+  const devS = db.get('SELECT individual_address, name, status FROM devices WHERE id=?', [+req.params.did]);
   db.run('UPDATE devices SET status=? WHERE id=?', [req.body.status, +req.params.did]);
+  db.audit(+req.params.pid, 'update', 'device', devS?.individual_address || req.params.did,
+    `status: "${devS?.status ?? ''}" → "${req.body.status}" on "${devS?.name || req.params.did}"`);
   db.scheduleSave();
   res.json({ ok: true });
 });
 
 router.delete('/projects/:pid/devices/:did', (req, res) => {
   const did = +req.params.did;
+  const devD = db.get('SELECT individual_address, name FROM devices WHERE id=?', [did]);
   db.run('DELETE FROM com_objects WHERE device_id=?', [did]);
   db.run('DELETE FROM devices WHERE id=?', [did]);
+  db.audit(+req.params.pid, 'delete', 'device', devD?.individual_address || did, `Deleted device "${devD?.name || did}"`);
   db.scheduleSave();
   res.json({ ok: true });
 });
@@ -623,9 +637,21 @@ router.get('/projects/:pid/devices/:did/param-model', (req, res) => {
 });
 
 router.patch('/projects/:pid/devices/:did/param-values', (req, res) => {
-  const dev = db.get('SELECT id FROM devices WHERE id=? AND project_id=?', [+req.params.did, +req.params.pid]);
-  if (!dev) return res.status(404).json({ error: 'Not found' });
-  db.run('UPDATE devices SET param_values=? WHERE id=?', [JSON.stringify(req.body), +req.params.did]);
+  const devPV = db.get('SELECT * FROM devices WHERE id=? AND project_id=?', [+req.params.did, +req.params.pid]);
+  if (!devPV) return res.status(404).json({ error: 'Not found' });
+  let oldVals = {};
+  try { oldVals = JSON.parse(devPV.param_values || '{}'); } catch (_) {}
+  const newVals = req.body;
+  const diffs = [];
+  for (const k of Object.keys(newVals)) {
+    const ov = oldVals[k], nv = newVals[k];
+    if (JSON.stringify(ov) !== JSON.stringify(nv)) {
+      diffs.push(`${k}: "${ov ?? ''}" → "${nv}"`);
+    }
+  }
+  db.run('UPDATE devices SET param_values=? WHERE id=?', [JSON.stringify(newVals), +req.params.did]);
+  db.audit(+req.params.pid, 'update', 'param_values', devPV.individual_address || req.params.did,
+    diffs.join('; ') || `Updated parameters on "${devPV.name || req.params.did}"`);
   db.scheduleSave();
   res.json({ ok: true });
 });
@@ -663,6 +689,7 @@ router.post('/projects/:id/gas', (req, res) => {
     'INSERT OR REPLACE INTO group_addresses (project_id,address,name,dpt,main_g,middle_g,sub_g,middle_group_name) VALUES (?,?,?,?,?,?,?,?)',
     [pid, b.address, b.name||b.address, b.dpt||'', m, mi, s, mgName]
   );
+  db.audit(pid, 'create', 'group_address', b.address, `Created group address "${b.name || b.address}"`);
   db.scheduleSave();
   res.json(db.get('SELECT * FROM group_addresses WHERE id=?', [lastInsertRowid]));
 });
@@ -671,23 +698,27 @@ router.put('/projects/:pid/gas/:gid', (req, res) => {
   const { pid, gid } = req.params;
   const b = req.body;
   if (b.name !== undefined && !b.name?.trim()) return res.status(400).json({ error: 'name required' });
-  const g = db.get('SELECT id FROM group_addresses WHERE id=? AND project_id=?', [+gid, +pid]);
-  if (!g) return res.status(404).json({ error: 'Not found' });
-  const sets = [], vals = [];
-  if (b.name !== undefined)       { sets.push('name=?');        vals.push(b.name.trim()); }
-  if (b.dpt !== undefined)        { sets.push('dpt=?');         vals.push(b.dpt); }
-  if (b.description !== undefined){ sets.push('description=?'); vals.push(b.description); }
-  if (b.comment !== undefined)    { sets.push('comment=?');     vals.push(b.comment); }
+  const oldGA = db.get('SELECT * FROM group_addresses WHERE id=? AND project_id=?', [+gid, +pid]);
+  if (!oldGA) return res.status(404).json({ error: 'Not found' });
+  const sets = [], vals = [], diffs = [];
+  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${oldGA[col] ?? ''}" → "${newVal}"`); };
+  if (b.name !== undefined)       track('name', b.name.trim());
+  if (b.dpt !== undefined)        track('dpt', b.dpt);
+  if (b.description !== undefined) track('description', b.description);
+  if (b.comment !== undefined)    track('comment', b.comment);
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
   vals.push(+gid);
   db.run(`UPDATE group_addresses SET ${sets.join(', ')} WHERE id=?`, vals);
+  db.audit(+pid, 'update', 'group_address', oldGA.address || gid, diffs.join('; '));
   db.scheduleSave();
   res.json({ ok: true });
 });
 
 router.delete('/projects/:pid/gas/:gid', (req, res) => {
   const gid = +req.params.gid;
+  const gaD = db.get('SELECT address, name FROM group_addresses WHERE id=?', [gid]);
   db.run('DELETE FROM group_addresses WHERE id=?', [gid]);
+  db.audit(+req.params.pid, 'delete', 'group_address', gaD?.address || gid, `Deleted group address "${gaD?.name || gid}"`);
   db.scheduleSave();
   res.json({ ok: true });
 });
@@ -730,8 +761,37 @@ router.patch('/projects/:pid/comobjects/:coid/gas', (req, res) => {
 
   db.run('UPDATE com_objects SET ga_address=?, ga_send=?, ga_receive=? WHERE id=?',
     [gaAddr.join(' '), gaSend, gaRecv, co.id]);
+  const oldGAs = (co.ga_address || '').trim() || '(none)';
+  const newGAs = gaAddr.join(' ') || '(none)';
+  db.audit(+req.params.pid, 'update', 'com_object', `CO ${co.object_number}`,
+    `ga_address: "${oldGAs}" → "${newGAs}" on "${co.name || co.object_number}"`);
   db.scheduleSave();
   res.json({ ...co, ga_address: gaAddr.join(' '), ga_send: gaSend, ga_receive: gaRecv });
+});
+
+// ── Audit Log ────────────────────────────────────────────────────────────────
+router.get('/projects/:id/audit-log', (req, res) => {
+  const limit = parseInt(req.query.limit) || 500;
+  res.json(db.all(
+    'SELECT * FROM audit_log WHERE project_id=? ORDER BY id DESC LIMIT ?',
+    [+req.params.id, limit]
+  ));
+});
+
+router.get('/projects/:id/audit-log/csv', (req, res) => {
+  const rows = db.all(
+    'SELECT * FROM audit_log WHERE project_id=? ORDER BY id DESC',
+    [+req.params.id]
+  );
+  const escape = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+  const header = 'timestamp,action,entity,entity_id,detail';
+  const lines = rows.map(r =>
+    [r.timestamp, r.action, r.entity, r.entity_id, r.detail].map(escape).join(',')
+  );
+  const csv = [header, ...lines].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="audit-log-${req.params.id}.csv"`);
+  res.send(csv);
 });
 
 // ── Telegrams ─────────────────────────────────────────────────────────────────

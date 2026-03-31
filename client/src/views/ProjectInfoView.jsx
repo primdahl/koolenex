@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useC } from '../theme.js';
 import { Btn, Spinner } from '../primitives.jsx';
 import { api } from '../api.js';
@@ -194,6 +194,8 @@ export function ProjectInfoView({ project, data, lang, onLangChange, languages, 
           ))}
         </div>
 
+        <AuditLogSection projectId={project?.id} C={C} />
+
         {languages && languages.length > 1 && (
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20 }}>
             <div style={{ fontSize: 11, color: C.accent, fontWeight: 600, letterSpacing: '0.08em', marginBottom: 16 }}>LANGUAGE</div>
@@ -208,6 +210,82 @@ export function ProjectInfoView({ project, data, lang, onLangChange, languages, 
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function AuditLogSection({ projectId, C }) {
+  const [logs, setLogs] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    if (!projectId) return;
+    setLoading(true);
+    api.getAuditLog(projectId, 200).then(setLogs).catch(() => setLogs([])).finally(() => setLoading(false));
+  }, [projectId]);
+
+  useEffect(() => { if (expanded && logs === null) load(); }, [expanded, logs, load]);
+
+  const actionColor = (a) => {
+    if (a === 'create' || a === 'import') return C.green;
+    if (a === 'delete') return C.red;
+    if (a === 'update' || a === 'reimport') return C.amber;
+    return C.muted;
+  };
+
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+        onClick={() => setExpanded(!expanded)}>
+        <div style={{ fontSize: 11, color: C.accent, fontWeight: 600, letterSpacing: '0.08em' }}>AUDIT LOG</div>
+        <span style={{ fontSize: 10, color: C.dim }}>{expanded ? '▲' : '▼'}</span>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <Btn onClick={load} disabled={loading}>{loading ? 'Loading...' : '↻ Refresh'}</Btn>
+            {projectId && (
+              <a href={api.auditLogCsvUrl(projectId)} download
+                style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 12px', fontSize: 11, fontFamily: 'inherit',
+                  fontWeight: 600, borderRadius: 4, background: C.accent + '18', color: C.accent, textDecoration: 'none',
+                  border: `1px solid ${C.accent}33` }}>
+                ↓ Download CSV
+              </a>
+            )}
+          </div>
+
+          {logs && logs.length === 0 && (
+            <div style={{ fontSize: 11, color: C.dim, padding: '8px 0' }}>No audit log entries yet.</div>
+          )}
+
+          {logs && logs.length > 0 && (
+            <div style={{ maxHeight: 320, overflow: 'auto', border: `1px solid ${C.border}`, borderRadius: 4 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: 'inherit' }}>
+                <thead>
+                  <tr style={{ position: 'sticky', top: 0, background: C.bg }}>
+                    {['Time', 'Action', 'Entity', 'ID', 'Detail'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: C.dim, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map(r => (
+                    <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}22` }}>
+                      <td style={{ padding: '4px 8px', color: C.dim, whiteSpace: 'nowrap' }}>{r.timestamp}</td>
+                      <td style={{ padding: '4px 8px', color: actionColor(r.action), fontWeight: 600 }}>{r.action}</td>
+                      <td style={{ padding: '4px 8px', color: C.muted }}>{r.entity}</td>
+                      <td style={{ padding: '4px 8px', color: C.text, fontFamily: "'IBM Plex Mono',monospace", fontSize: 9 }}>{r.entity_id}</td>
+                      <td style={{ padding: '4px 8px', color: C.muted }}>{r.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
