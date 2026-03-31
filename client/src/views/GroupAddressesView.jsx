@@ -24,12 +24,8 @@ export function GroupAddressesView({ data, busConnected, activeProjectId, onWrit
   const [inlineName, setInlineName] = useState('');
   const [inlineDpt, setInlineDpt] = useState('');
   const [inlineSaving, setInlineSaving] = useState(false);
-  const [editGroup, setEditGroup] = useState(null); // { main, middle (null for main), name }
-  const [editGroupName, setEditGroupName] = useState('');
-  const [editGroupSaving, setEditGroupSaving] = useState(false);
+  const [editGroup, setEditGroup] = useState(null); // { main, middle (null for main) }
   const [editGAId, setEditGAId] = useState(null);
-  const [editGAName, setEditGAName] = useState('');
-  const [editGASaving, setEditGASaving] = useState(false);
   const { gas = [], devices = [], gaDeviceMap = {} } = data || {};
 
   const GA_COLS = useMemo(() => [
@@ -110,36 +106,14 @@ export function GroupAddressesView({ data, busConnected, activeProjectId, onWrit
     setInlineSaving(false);
   };
 
-  const handleGroupNameSave = async () => {
-    if (!editGroupName.trim() || !onRenameGAGroup || !editGroup) return;
-    setEditGroupSaving(true);
-    try {
-      await onRenameGAGroup(editGroup.main, editGroup.middle, editGroupName.trim());
-      setEditGroup(null);
-    } catch (_) {}
-    setEditGroupSaving(false);
-  };
-
-  const handleGANameSave = async () => {
-    if (!editGAName.trim() || !onUpdateGA || !editGAId) return;
-    setEditGASaving(true);
-    try {
-      await onUpdateGA(editGAId, { name: editGAName.trim() });
-      setEditGAId(null);
-    } catch (_) {}
-    setEditGASaving(false);
-  };
-
-  const startEditGroup = (e, main, middle, currentName) => {
+  const startEditGroup = (e, main, middle) => {
     e.stopPropagation();
     setEditGroup({ main, middle });
-    setEditGroupName(currentName || '');
   };
 
   const startEditGA = (e, ga) => {
     e.stopPropagation();
     setEditGAId(ga.id);
-    setEditGAName(ga.name);
   };
 
   useEffect(() => { try { localStorage.setItem('knx-ga-expand', JSON.stringify(expand)); } catch {} }, [expand]);
@@ -171,13 +145,9 @@ export function GroupAddressesView({ data, busConnected, activeProjectId, onWrit
           </div>
         </TD>}
         {gcv('name') && <TD>{editGAId === g.id ? (
-          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <input value={editGAName} onChange={e => setEditGAName(e.target.value)} autoFocus
-              onKeyDown={e => { if (e.key === 'Enter') handleGANameSave(); if (e.key === 'Escape') setEditGAId(null); }}
-              style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize: 11, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
-            <Btn onClick={handleGANameSave} disabled={editGASaving || !editGAName.trim()} color={C.green}>{editGASaving ? <Spinner /> : 'Save'}</Btn>
-            <Btn onClick={() => setEditGAId(null)} color={C.dim}>Cancel</Btn>
-          </div>
+          <InlineEdit initial={g.name} fontSize={11}
+            onSave={async (v) => { await onUpdateGA(g.id, { name: v }); setEditGAId(null); }}
+            onCancel={() => setEditGAId(null)} C={C} />
         ) : (
           <span onClick={onUpdateGA ? e => startEditGA(e, g) : undefined}
             style={{ cursor: onUpdateGA ? 'text' : 'default' }}
@@ -274,21 +244,16 @@ export function GroupAddressesView({ data, busConnected, activeProjectId, onWrit
                 <div onClick={() => toggleMain(main)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', background: C.surface, borderBottom: `1px solid ${C.border}`, cursor: 'pointer', userSelect: 'none' }}>
                   <span style={{ fontSize: 9, color: C.dim, width: 14 }}>{mainExpanded ? '▾' : '▸'}</span>
                   {editGroup?.main === main && editGroup?.middle === null ? (
-                    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
-                      <span style={{ color: C.accent, fontSize: 11, fontWeight: 600 }}>{main} —</span>
-                      <input value={editGroupName} onChange={e => setEditGroupName(e.target.value)} autoFocus
-                        onKeyDown={e => { if (e.key === 'Enter') handleGroupNameSave(); if (e.key === 'Escape') setEditGroup(null); }}
-                        style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize: 11, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
-                      <Btn onClick={handleGroupNameSave} disabled={editGroupSaving || !editGroupName.trim()} color={C.green}>{editGroupSaving ? <Spinner /> : 'Save'}</Btn>
-                      <Btn onClick={() => setEditGroup(null)} color={C.dim}>Cancel</Btn>
-                    </div>
+                    <InlineEdit prefix={`${main} —`} initial={mainName || ''} fontSize={11}
+                      onSave={async (v) => { await onRenameGAGroup(main, null, v); setEditGroup(null); }}
+                      onCancel={() => setEditGroup(null)} C={C} />
                   ) : (
                     <>
                       <span style={{ color: C.accent, fontSize: 11, fontWeight: 600 }}>{main}</span>
-                      {mainName ? <span onClick={onRenameGAGroup ? e => startEditGroup(e, main, null, mainName) : undefined}
+                      {mainName ? <span onClick={onRenameGAGroup ? e => startEditGroup(e, main, null) : undefined}
                         style={{ color: C.accent, fontSize: 11, fontWeight: 600, cursor: onRenameGAGroup ? 'text' : 'default' }}
                         title={onRenameGAGroup ? 'Click to rename' : undefined}>— {mainName}</span>
-                      : onRenameGAGroup && <span onClick={e => startEditGroup(e, main, null, '')}
+                      : onRenameGAGroup && <span onClick={e => startEditGroup(e, main, null)}
                         style={{ color: C.dim, fontSize: 10, cursor: 'pointer', fontStyle: 'italic' }}>+ name</span>}
                     </>
                   )}
@@ -318,21 +283,16 @@ export function GroupAddressesView({ data, busConnected, activeProjectId, onWrit
                       <div onClick={() => toggleMid(main, mid)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px 5px 28px', background: C.hover, borderBottom: `1px solid ${C.border}`, cursor: 'pointer', userSelect: 'none' }}>
                         <span style={{ fontSize: 9, color: C.dim, width: 14 }}>{midExpanded ? '▾' : '▸'}</span>
                         {editGroup?.main === main && editGroup?.middle === mid ? (
-                          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
-                            <span style={{ color: C.text, fontSize: 10, fontWeight: 500 }}>{main}/{mid} —</span>
-                            <input value={editGroupName} onChange={e => setEditGroupName(e.target.value)} autoFocus
-                              onKeyDown={e => { if (e.key === 'Enter') handleGroupNameSave(); if (e.key === 'Escape') setEditGroup(null); }}
-                              style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize: 10, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
-                            <Btn onClick={handleGroupNameSave} disabled={editGroupSaving || !editGroupName.trim()} color={C.green}>{editGroupSaving ? <Spinner /> : 'Save'}</Btn>
-                            <Btn onClick={() => setEditGroup(null)} color={C.dim}>Cancel</Btn>
-                          </div>
+                          <InlineEdit prefix={`${main}/${mid} —`} initial={midName || ''} fontSize={10}
+                            onSave={async (v) => { await onRenameGAGroup(main, mid, v); setEditGroup(null); }}
+                            onCancel={() => setEditGroup(null)} C={C} />
                         ) : (
                           <>
                             <span style={{ color: C.text, fontSize: 10, fontWeight: 500 }}>{main}/{mid}</span>
-                            {midName ? <span onClick={onRenameGAGroup ? e => startEditGroup(e, main, mid, midName) : undefined}
+                            {midName ? <span onClick={onRenameGAGroup ? e => startEditGroup(e, main, mid) : undefined}
                               style={{ color: C.text, fontSize: 10, fontWeight: 500, cursor: onRenameGAGroup ? 'text' : 'default' }}
                               title={onRenameGAGroup ? 'Click to rename' : undefined}>— {midName}</span>
-                            : onRenameGAGroup && <span onClick={e => startEditGroup(e, main, mid, '')}
+                            : onRenameGAGroup && <span onClick={e => startEditGroup(e, main, mid)}
                               style={{ color: C.dim, fontSize: 9, cursor: 'pointer', fontStyle: 'italic' }}>+ name</span>}
                           </>
                         )}
@@ -374,6 +334,29 @@ export function GroupAddressesView({ data, busConnected, activeProjectId, onWrit
           {filtered.length === 0 && <Empty icon="◆" msg="No group addresses" />}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Self-contained inline edit — owns its own input state so parent re-renders don't reset cursor. */
+function InlineEdit({ initial, prefix, fontSize = 11, onSave, onCancel, C }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!value.trim()) return;
+    setSaving(true);
+    try { await onSave(value.trim()); }
+    catch (_) {}
+    setSaving(false);
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
+      {prefix && <span style={{ fontSize, fontWeight: 600, whiteSpace: 'nowrap' }}>{prefix}</span>}
+      <input value={value} onChange={e => setValue(e.target.value)} autoFocus
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+        style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
+      <Btn onClick={save} disabled={saving || !value.trim()} color={C.green}>{saving ? <Spinner /> : 'Save'}</Btn>
+      <Btn onClick={onCancel} color={C.dim}>Cancel</Btn>
     </div>
   );
 }

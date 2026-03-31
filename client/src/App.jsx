@@ -262,23 +262,34 @@ export default function App() {
   // ── Undo system ─────────────────────────────────────────────────────────────
   const undoStackRef = useRef([]);
   const [undoCount, setUndoCount] = useState(0);
+  const [undoOpen, setUndoOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const pushUndo = useCallback((desc, undoFn) => {
-    undoStackRef.current.push({ desc, undo: undoFn });
-    setUndoCount(undoStackRef.current.length);
+  const pushUndo = useCallback((desc, detail, undoFn) => {
+    const stack = undoStackRef.current;
+    stack.push({ desc, detail, undo: undoFn });
+    if (stack.length > 50) stack.splice(0, stack.length - 50);
+    setUndoCount(stack.length);
   }, []);
 
-  const performUndo = useCallback(async () => {
-    const item = undoStackRef.current.pop();
-    if (!item) return;
-    setUndoCount(undoStackRef.current.length);
-    try {
-      await item.undo();
-      setToast(`Undone: ${item.desc}`);
-    } catch (e) {
-      setToast(`Undo failed: ${e.message}`);
+  const performUndo = useCallback(async (count = 1) => {
+    setUndoOpen(false);
+    const stack = undoStackRef.current;
+    const n = Math.min(count, stack.length);
+    const descs = [];
+    for (let i = 0; i < n; i++) {
+      const item = stack.pop();
+      if (!item) break;
+      try {
+        await item.undo();
+        descs.push(item.desc);
+      } catch (e) {
+        setToast(`Undo failed: ${e.message}`);
+        break;
+      }
     }
+    setUndoCount(stack.length);
+    if (descs.length) setToast(`Undone: ${descs.join(', ')}`);
   }, []);
 
   useEffect(() => {
@@ -292,19 +303,24 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [performUndo]);
 
+  const diffDetail = (prev, patch) =>
+    Object.keys(patch).filter(k => String(prev[k] ?? '') !== String(patch[k] ?? ''))
+      .map(k => `${k}: "${prev[k] ?? ''}" → "${patch[k]}"`).join('; ');
+
   const handleUpdateGA = useCallback(async (gaId, patch) => {
     if (!state.activeProjectId) return;
     const prev = state.projectData?.gas?.find(g => g.id === gaId);
-    const prevPatch = prev ? { name: prev.name, dpt: prev.dpt, description: prev.description || '', comment: prev.comment || '' } : null;
+    if (!prev) return;
+    const prevPatch = {};
+    for (const k of Object.keys(patch)) prevPatch[k] = prev[k] ?? '';
+    const detail = diffDetail(prev, patch);
     await api.updateGA(state.activeProjectId, gaId, patch);
     dispatch({ type: 'PATCH_GA', id: gaId, patch });
-    if (prevPatch) {
-      const pid = state.activeProjectId;
-      pushUndo(`Edit GA ${prev.address}`, async () => {
-        await api.updateGA(pid, gaId, prevPatch);
-        dispatch({ type: 'PATCH_GA', id: gaId, patch: prevPatch });
-      });
-    }
+    const pid = state.activeProjectId;
+    pushUndo(`Edit GA ${prev.address}`, detail, async () => {
+      await api.updateGA(pid, gaId, prevPatch);
+      dispatch({ type: 'PATCH_GA', id: gaId, patch: prevPatch });
+    });
   }, [state.activeProjectId, state.projectData, pushUndo]);
 
   const handleRenameGAGroup = useCallback(async (main, middle, name) => {
@@ -319,16 +335,17 @@ export default function App() {
   const handleUpdateDevice = useCallback(async (deviceId, patch) => {
     if (!state.activeProjectId) return;
     const prev = state.projectData?.devices?.find(d => d.id === deviceId);
-    const prevPatch = prev ? { name: prev.name, description: prev.description || '', comment: prev.comment || '', installation_hints: prev.installation_hints || '' } : null;
+    if (!prev) return;
+    const prevPatch = {};
+    for (const k of Object.keys(patch)) prevPatch[k] = prev[k] ?? '';
+    const detail = diffDetail(prev, patch);
     await api.updateDevice(state.activeProjectId, deviceId, patch);
     dispatch({ type: 'PATCH_DEVICE', id: deviceId, patch });
-    if (prevPatch) {
-      const pid = state.activeProjectId;
-      pushUndo(`Edit device ${prev.individual_address}`, async () => {
-        await api.updateDevice(pid, deviceId, prevPatch);
-        dispatch({ type: 'PATCH_DEVICE', id: deviceId, patch: prevPatch });
-      });
-    }
+    const pid = state.activeProjectId;
+    pushUndo(`Edit device ${prev.individual_address}`, detail, async () => {
+      await api.updateDevice(pid, deviceId, prevPatch);
+      dispatch({ type: 'PATCH_DEVICE', id: deviceId, patch: prevPatch });
+    });
   }, [state.activeProjectId, state.projectData, pushUndo]);
 
   const handleCreateGA = useCallback(async (body) => {
@@ -336,7 +353,7 @@ export default function App() {
     const ga = await api.createGA(state.activeProjectId, body);
     dispatch({ type: 'ADD_GA', ga });
     const pid = state.activeProjectId;
-    pushUndo(`Create GA ${ga.address}`, async () => {
+    pushUndo(`Create GA ${ga.address}`, `"${ga.name}"`, async () => {
       await api.deleteGA(pid, ga.id);
       dispatch({ type: 'DELETE_GA', id: ga.id });
     });
@@ -351,7 +368,7 @@ export default function App() {
     dispatch({ type: 'DELETE_GA', id: gaId });
     const pid = state.activeProjectId;
     const gaData = { address: ga.address, name: ga.name, dpt: ga.dpt };
-    pushUndo(`Delete GA ${ga.address}`, async () => {
+    pushUndo(`Delete GA ${ga.address}`, `"${ga.name}"`, async () => {
       const newGa = await api.createGA(pid, gaData);
       dispatch({ type: 'ADD_GA', ga: newGa });
     });
@@ -377,7 +394,7 @@ export default function App() {
     const device = await api.createDevice(state.activeProjectId, body);
     dispatch({ type: 'ADD_DEVICE', device });
     const pid = state.activeProjectId;
-    pushUndo(`Add device ${device.individual_address}`, async () => {
+    pushUndo(`Add device ${device.individual_address}`, `"${device.name}"`, async () => {
       await api.deleteDevice(pid, device.id);
       dispatch({ type: 'DELETE_DEVICE', id: device.id });
     });
@@ -411,9 +428,35 @@ export default function App() {
             title="Forward (Alt+→)">›</button>
         </div>
         {undoCount > 0 && (
-          <button onClick={performUndo} title={`Undo (Ctrl+Z) — ${undoCount} action${undoCount !== 1 ? 's' : ''}`}
-            style={{ background: 'none', border: 'none', color: C.amber, fontSize: 11, cursor: 'pointer', padding: '0 6px', lineHeight: 1 }}
-            className="bg">↩ {undoCount}</button>
+          <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <button onClick={() => performUndo()} title={`Undo (Ctrl+Z)`}
+              style={{ background: 'none', border: 'none', color: C.amber, fontSize: 11, cursor: 'pointer', padding: '0 2px 0 6px', lineHeight: 1 }}
+              className="bg">↩ {undoCount}</button>
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => setUndoOpen(p => !p)} title="Show undo history"
+                style={{ background: 'none', border: 'none', color: C.amber, fontSize: 8, cursor: 'pointer', padding: '0 4px', lineHeight: 1, opacity: 0.7 }}
+                className="bg">▾</button>
+              {undoOpen && (
+                <>
+                  <div onClick={() => setUndoOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', zIndex: 1000, minWidth: 240, maxHeight: 320, overflow: 'auto' }}>
+                  <div style={{ padding: '8px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 9, color: C.dim, fontWeight: 600, letterSpacing: '0.08em' }}>UNDO HISTORY</div>
+                  {[...undoStackRef.current].reverse().map((item, i) => (
+                    <div key={i} onClick={() => performUndo(i + 1)}
+                      className="rh"
+                      style={{ padding: '6px 12px', cursor: 'pointer', borderBottom: `1px solid ${C.border}11` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: C.text }}>{item.desc}</span>
+                        {i > 0 && <span style={{ fontSize: 9, color: C.dim, marginLeft: 8, whiteSpace: 'nowrap' }}>+{i}</span>}
+                      </div>
+                      {item.detail && <div style={{ fontSize: 9, color: C.dim, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }}>{item.detail}</div>}
+                    </div>
+                  ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         )}
         {state.projectData?.project && <>
           <span style={{ color: C.border2 }}>/</span>
