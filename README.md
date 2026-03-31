@@ -30,6 +30,7 @@ PROCEED AT YOUR OWN RISK.
 - **Device Programming** — download application programs, parameters, group address tables, and association tables to devices (work in progress)
 - **Device Comparison** — compare two devices side by side, or select multiple devices of the same type for multi-device parameter diff
 - **Floor Plan** — upload floor plan images for each floor and drag devices onto them to visualize your installation layout
+- **Label Printing** — print device address labels on Avery label sheets (L4730, L4731, L4732, L6008, L7636, L7651, L7656) or a full-page legend sheet for distribution board doors; configurable fields, device selection, and print preview
 - **Audit Log** — per-project log of all changes with before/after detail, viewable in the UI and downloadable as CSV
 - **Settings** — theme (dark/light), DPT display format (numeric/formal/friendly), language
 - **Editable fields** — click-to-edit names, descriptions, comments, and installation hints with RTF rendering
