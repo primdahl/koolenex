@@ -748,6 +748,23 @@ router.put('/projects/:pid/gas/:gid', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Spaces ───────────────────────────────────────────────────────────────────
+router.put('/projects/:pid/spaces/:sid', (req, res) => {
+  const { pid, sid } = req.params;
+  const b = req.body;
+  const old = db.get('SELECT * FROM spaces WHERE id=? AND project_id=?', [+sid, +pid]);
+  if (!old) return res.status(404).json({ error: 'Not found' });
+  const sets = [], vals = [], diffs = [];
+  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  if (b.name !== undefined) track('name', b.name.trim());
+  if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+  vals.push(+sid);
+  db.run(`UPDATE spaces SET ${sets.join(', ')} WHERE id=?`, vals);
+  db.audit(+pid, 'update', 'space', old.name || sid, diffs.join('; '));
+  db.scheduleSave();
+  res.json({ ok: true });
+});
+
 // Rename a main or middle group
 router.patch('/projects/:pid/gas/group-name', (req, res) => {
   const pid = +req.params.pid;

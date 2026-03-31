@@ -8,7 +8,7 @@ import { spaceUsageMap, localizedModel } from '../dpt.js';
 
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function LocationsView({ data, dispatch, onAddDevice }) {
+export function LocationsView({ data, dispatch, onAddDevice, onUpdateDevice, onUpdateSpace }) {
   const C = useC();
   const pin = useContext(PinContext);
   const { t: i18t } = useContext(I18nCtx);
@@ -17,6 +17,8 @@ export function LocationsView({ data, dispatch, onAddDevice }) {
   const [search, setSearch] = useState('');
   const [addDefaults, setAddDefaults] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [editSpaceId, setEditSpaceId] = useState(null);
+  const [editDevId, setEditDevId] = useState(null);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       const stored = localStorage.getItem('knx-loc-collapsed');
@@ -110,11 +112,18 @@ export function LocationsView({ data, dispatch, onAddDevice }) {
             ? <span style={{ color: C.dim, fontSize: 9, width: 10 }}>{isCollapsed ? '▸' : '▾'}</span>
             : <span style={{ width: 10 }} />}
           <span style={{ color: depth === 0 ? C.amber : C.dim }} title={node.type}><SpaceTypeIcon type={node.type} size={13} /></span>
-          <span
-            className={pin ? 'pa' : undefined} data-pin={pin ? '1' : undefined}
-            style={{ fontWeight: depth <= 1 ? 600 : 400, fontSize: depth === 0 ? 11 : 10, color: depth === 0 ? C.amber : pin ? C.amber : C.text, cursor: pin ? 'pointer' : 'default' }}
-            onClick={pin ? (e) => { e.stopPropagation(); pin('space', String(node.id)); } : undefined}
-          >{node.name}</span>
+          {editSpaceId === node.id ? (
+            <InlineEdit initial={node.name} fontSize={depth === 0 ? 11 : 10}
+              onSave={async (v) => { await onUpdateSpace(node.id, { name: v }); setEditSpaceId(null); }}
+              onCancel={() => setEditSpaceId(null)} C={C} />
+          ) : (
+            <span
+              className={pin ? 'pa' : undefined} data-pin={pin ? '1' : undefined}
+              style={{ fontWeight: depth <= 1 ? 600 : 400, fontSize: depth === 0 ? 11 : 10, color: depth === 0 ? C.amber : pin ? C.amber : C.text, cursor: onUpdateSpace ? 'text' : pin ? 'pointer' : 'default' }}
+              onClick={onUpdateSpace ? (e) => { e.stopPropagation(); setEditSpaceId(node.id); } : pin ? (e) => { e.stopPropagation(); pin('space', String(node.id)); } : undefined}
+              title={onUpdateSpace ? 'Click to rename' : undefined}
+            >{node.name}</span>
+          )}
           {node.type === 'Room' && spaceUsageMap()[node.usage_id] && (
             <span style={{ color: C.dim, fontSize: 10, marginLeft: 4 }}>· {i18t(node.usage_id) || spaceUsageMap()[node.usage_id]}</span>
           )}
@@ -157,9 +166,18 @@ export function LocationsView({ data, dispatch, onAddDevice }) {
                       {lcv('individual_address') && <TD style={{ paddingLeft: 14 + depth * 18 + 28 }}>
                         <PinAddr address={d.individual_address} wtype="device" style={{ color: C.accent, fontFamily: 'monospace' }} />
                       </TD>}
-                      {lcv('name') && <TD><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <DeviceTypeIcon type={d.device_type} style={{ color: COLMAP[d.device_type] || C.muted }} />{d.name}
-                      </span></TD>}
+                      {lcv('name') && <TD>{editDevId === d.id ? (
+                        <InlineEdit initial={d.name} fontSize={11}
+                          onSave={async (v) => { await onUpdateDevice(d.id, { name: v }); setEditDevId(null); }}
+                          onCancel={() => setEditDevId(null)} C={C} />
+                      ) : (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <DeviceTypeIcon type={d.device_type} style={{ color: COLMAP[d.device_type] || C.muted }} />
+                          <span onClick={onUpdateDevice ? e => { e.stopPropagation(); setEditDevId(d.id); } : undefined}
+                            style={{ cursor: onUpdateDevice ? 'text' : 'default' }}
+                            title={onUpdateDevice ? 'Click to rename' : undefined}>{d.name}</span>
+                        </span>
+                      )}</TD>}
                       {lcv('device_type') && <TD><span style={{ color: C.muted }}>{d.device_type}</span></TD>}
                       {lcv('manufacturer') && <TD><PinAddr address={d.manufacturer} wtype="manufacturer" style={{ color: C.amber }}>{d.manufacturer || '—'}</PinAddr></TD>}
                       {lcv('model') && <TD><PinAddr address={d.model} wtype="model" style={{ color: C.amber, fontFamily: 'monospace', fontSize: 10 }}>{localizedModel(d) || '—'}</PinAddr></TD>}
@@ -211,7 +229,18 @@ export function LocationsView({ data, dispatch, onAddDevice }) {
                 {unplaced.map(d => (
                   <tr key={d.id} className="rh" style={{ borderLeft: '2px solid transparent' }}>
                     {lcv('individual_address') && <TD style={{ paddingLeft: 42 }}><PinAddr address={d.individual_address} wtype="device" style={{ color: C.accent, fontFamily: 'monospace' }} /></TD>}
-                    {lcv('name') && <TD><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><DeviceTypeIcon type={d.device_type} style={{ color: COLMAP[d.device_type] || C.muted }} />{d.name}</span></TD>}
+                    {lcv('name') && <TD>{editDevId === d.id ? (
+                      <InlineEdit initial={d.name} fontSize={11}
+                        onSave={async (v) => { await onUpdateDevice(d.id, { name: v }); setEditDevId(null); }}
+                        onCancel={() => setEditDevId(null)} C={C} />
+                    ) : (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <DeviceTypeIcon type={d.device_type} style={{ color: COLMAP[d.device_type] || C.muted }} />
+                        <span onClick={onUpdateDevice ? e => { e.stopPropagation(); setEditDevId(d.id); } : undefined}
+                          style={{ cursor: onUpdateDevice ? 'text' : 'default' }}
+                          title={onUpdateDevice ? 'Click to rename' : undefined}>{d.name}</span>
+                      </span>
+                    )}</TD>}
                     {lcv('device_type') && <TD><span style={{ color: C.muted }}>{d.device_type}</span></TD>}
                     {lcv('manufacturer') && <TD><PinAddr address={d.manufacturer} wtype="manufacturer" style={{ color: C.amber }}>{d.manufacturer || '—'}</PinAddr></TD>}
                     {lcv('model') && <TD><PinAddr address={d.model} wtype="model" style={{ color: C.amber, fontFamily: 'monospace', fontSize: 10 }}>{d.model || '—'}</PinAddr></TD>}
@@ -234,6 +263,26 @@ export function LocationsView({ data, dispatch, onAddDevice }) {
         ))}
       </div>
       {addDefaults && onAddDevice && <AddDeviceModal data={data} defaults={addDefaults} onAdd={onAddDevice} onClose={() => setAddDefaults(null)} />}
+    </div>
+  );
+}
+
+function InlineEdit({ initial, fontSize = 11, onSave, onCancel, C }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!value.trim()) return;
+    setSaving(true);
+    try { await onSave(value.trim()); } catch (_) {}
+    setSaving(false);
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
+      <input value={value} onChange={e => setValue(e.target.value)} autoFocus
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+        style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
+      <Btn onClick={save} disabled={saving || !value.trim()} color={C.green}>{saving ? 'Saving' : 'Save'}</Btn>
+      <Btn onClick={onCancel} color={C.dim}>Cancel</Btn>
     </div>
   );
 }

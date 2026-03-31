@@ -57,6 +57,9 @@ export const api = {
   listComObjects: (pid)        => req('GET',  `/projects/${pid}/comobjects`),
   updateComObjectGAs: (pid, coid, body) => req('PATCH', `/projects/${pid}/comobjects/${coid}/gas`, body),
 
+  // Spaces
+  updateSpace:    (pid, sid, body) => req('PUT', `/projects/${pid}/spaces/${sid}`, body),
+
   // Audit Log
   getAuditLog:    (pid, limit) => req('GET', `/projects/${pid}/audit-log?limit=${limit||500}`),
   auditLogCsvUrl: (pid) => `${BASE}/projects/${pid}/audit-log/csv`,

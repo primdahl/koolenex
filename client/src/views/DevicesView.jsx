@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useC, STATUS_COLOR } from '../theme.js';
 import { localizedModel } from '../dpt.js';
 import { Badge, Chip, Btn, TH, TD, SearchBox, SectionHeader, Empty, PinAddr, SpacePath } from '../primitives.jsx';
@@ -6,13 +6,14 @@ import { useColumns, ColumnPicker, dlCSV } from '../columns.jsx';
 import { RtfText } from '../rtf.jsx';
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice }) {
+export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice, onUpdateDevice }) {
   const C = useC();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState(() => { try { return JSON.parse(localStorage.getItem('knx-devices-sort')) || { col: 'individual_address', dir: 1 }; } catch { return { col: 'individual_address', dir: 1 }; } });
   useEffect(() => { try { localStorage.setItem('knx-devices-sort', JSON.stringify(sort)); } catch {} }, [sort]);
   const [filterStatus, setFilterStatus] = useState('all');
   const [showAdd, setShowAdd] = useState(false);
+  const [editDevId, setEditDevId] = useState(null);
   const { devices = [], gas = [], deviceGAMap = {}, spaces = [] } = data || {};
 
   const DEV_COLS = useMemo(() => [
@@ -181,7 +182,15 @@ export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice }
                                 {mdl.devices.map(d => (
                                   <tr key={d.id} className="rh" onClick={() => onPin?.('device', d.individual_address)} style={{ borderLeft: '2px solid transparent', cursor: 'pointer' }}>
                                     {cv('individual_address') && <TD style={{ paddingLeft: 42 }}><PinAddr address={d.individual_address} wtype="device" style={{ color: C.accent, fontFamily: 'monospace' }} /></TD>}
-                                    {cv('name') && <TD>{d.name}</TD>}
+                                    {cv('name') && <TD>{editDevId === d.id ? (
+                                      <InlineEdit initial={d.name} fontSize={11}
+                                        onSave={async (v) => { await onUpdateDevice(d.id, { name: v }); setEditDevId(null); }}
+                                        onCancel={() => setEditDevId(null)} C={C} />
+                                    ) : (
+                                      <span onClick={onUpdateDevice ? e => { e.stopPropagation(); setEditDevId(d.id); } : undefined}
+                                        style={{ cursor: onUpdateDevice ? 'text' : 'default' }}
+                                        title={onUpdateDevice ? 'Click to rename' : undefined}>{d.name}</span>
+                                    )}</TD>}
                                     {cv('device_type') && <TD><span style={{ color: C.muted }}>{d.device_type}</span></TD>}
                                     {cv('location') && spaces.length > 0 && <TD><SpacePath spaceId={d.space_id} spaces={spaces} style={{ color: C.dim, fontSize: 10 }} /></TD>}
                                     {cv('manufacturer') && <TD><PinAddr address={d.manufacturer} wtype="manufacturer" style={{ color: C.amber }}>{d.manufacturer || '—'}</PinAddr></TD>}
@@ -228,7 +237,15 @@ export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice }
                     onClick={() => onPin?.('device', d.individual_address)}
                     style={{ borderLeft: '2px solid transparent', cursor: 'pointer' }}>
                     {cv('individual_address') && <TD><PinAddr address={d.individual_address} wtype="device" style={{ color: C.accent, fontFamily: 'monospace' }} /></TD>}
-                    {cv('name') && <TD>{d.name}</TD>}
+                    {cv('name') && <TD>{editDevId === d.id ? (
+                      <InlineEdit initial={d.name} fontSize={11}
+                        onSave={async (v) => { await onUpdateDevice(d.id, { name: v }); setEditDevId(null); }}
+                        onCancel={() => setEditDevId(null)} C={C} />
+                    ) : (
+                      <span onClick={onUpdateDevice ? e => { e.stopPropagation(); setEditDevId(d.id); } : undefined}
+                        style={{ cursor: onUpdateDevice ? 'text' : 'default' }}
+                        title={onUpdateDevice ? 'Click to rename' : undefined}>{d.name}</span>
+                    )}</TD>}
                     {cv('device_type') && <TD><span style={{ color: C.muted }}>{d.device_type}</span></TD>}
                     {cv('location') && spaces.length > 0 && <TD><SpacePath spaceId={d.space_id} spaces={spaces} style={{ color: C.dim, fontSize: 10 }} /></TD>}
                     {cv('manufacturer') && <TD><PinAddr address={d.manufacturer} wtype="manufacturer" style={{ color: C.amber }}>{d.manufacturer || '—'}</PinAddr></TD>}
@@ -238,7 +255,7 @@ export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice }
                     {cv('status') && <TD><Badge label={d.status.toUpperCase()} color={STATUS_COLOR[d.status] || C.dim} /></TD>}
                     {cv('gas') && <TD><span style={{ color: C.dim }}>{(deviceGAMap[d.individual_address] || []).length}</span></TD>}
                     {cv('description') && <TD><span style={{ color: C.dim, fontSize: 10 }}>{d.description && d.description !== d.name ? d.description : ''}</span></TD>}
-                                    {cv('comment') && <TD><span style={{ color: C.dim, fontSize: 10 }}><RtfText value={d.comment} /></span></TD>}
+                    {cv('comment') && <TD><span style={{ color: C.dim, fontSize: 10 }}><RtfText value={d.comment} /></span></TD>}
                     {cv('area') && <TD><span style={{ color: C.dim }}>{d.area}</span></TD>}
                     {cv('line') && <TD><span style={{ color: C.dim }}>{d.line}</span></TD>}
                     {cv('last_download') && <TD><span style={{ color: C.dim, fontSize: 10 }}>{d.last_download || '—'}</span></TD>}
@@ -259,6 +276,26 @@ export function DevicesView({ data, onDeviceStatus, jumpTo, onPin, onAddDevice }
         </div>
       </div>
       {showAdd && onAddDevice && <AddDeviceModal data={data} defaults={{}} onAdd={onAddDevice} onClose={() => setShowAdd(false)} />}
+    </div>
+  );
+}
+
+function InlineEdit({ initial, fontSize = 11, onSave, onCancel, C }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!value.trim()) return;
+    setSaving(true);
+    try { await onSave(value.trim()); } catch (_) {}
+    setSaving(false);
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
+      <input value={value} onChange={e => setValue(e.target.value)} autoFocus
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+        style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
+      <Btn onClick={save} disabled={saving || !value.trim()} color={C.green}>{saving ? 'Saving' : 'Save'}</Btn>
+      <Btn onClick={onCancel} color={C.dim}>Cancel</Btn>
     </div>
   );
 }

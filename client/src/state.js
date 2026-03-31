@@ -121,6 +121,11 @@ export function reducer(state, action) {
       });
       return { ...state, projectData: { ...state.projectData, gas } };
     }
+    case 'PATCH_SPACE': {
+      if (!state.projectData) return state;
+      const spaces = state.projectData.spaces.map(s => s.id === action.id ? { ...s, ...action.patch } : s);
+      return { ...state, projectData: { ...state.projectData, spaces } };
+    }
     case 'DELETE_GA': {
       if (!state.projectData) return state;
       const gas = state.projectData.gas.filter(g => g.id !== action.id);

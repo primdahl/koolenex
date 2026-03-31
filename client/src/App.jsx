@@ -348,6 +348,22 @@ export default function App() {
     });
   }, [state.activeProjectId, state.projectData, pushUndo]);
 
+  const handleUpdateSpace = useCallback(async (spaceId, patch) => {
+    if (!state.activeProjectId) return;
+    const prev = state.projectData?.spaces?.find(s => s.id === spaceId);
+    if (!prev) return;
+    const prevPatch = {};
+    for (const k of Object.keys(patch)) prevPatch[k] = prev[k] ?? '';
+    const detail = diffDetail(prev, patch);
+    await api.updateSpace(state.activeProjectId, spaceId, patch);
+    dispatch({ type: 'PATCH_SPACE', id: spaceId, patch });
+    const pid = state.activeProjectId;
+    pushUndo(`Edit space "${prev.name}"`, detail, async () => {
+      await api.updateSpace(pid, spaceId, prevPatch);
+      dispatch({ type: 'PATCH_SPACE', id: spaceId, patch: prevPatch });
+    });
+  }, [state.activeProjectId, state.projectData, pushUndo]);
+
   const handleCreateGA = useCallback(async (body) => {
     if (!state.activeProjectId) return null;
     const ga = await api.createGA(state.activeProjectId, body);
@@ -574,11 +590,11 @@ export default function App() {
           {state.view === 'settings' && <SettingsView theme={theme} onThemeChange={handleThemeChange} dptMode={dptMode} onDptModeChange={handleDptModeChange} />}
           {state.view === 'project'     && hasProject && <ProjectInfoView project={state.projects.find(p => p.id === state.activeProjectId)} data={state.projectData} lang={i18nLang} onLangChange={handleLangChange} languages={i18nData.languages} busStatus={state.busStatus} onConnect={handleConnect} onConnectUsb={handleConnectUsb} onDisconnect={handleDisconnect} />}
           {state.view === 'topology'    && hasProject && <TopologyView    data={state.projectData} onPin={handlePin} busConnected={state.busStatus.connected} dispatch={dispatch} onAddDevice={handleAddDevice} />}
-          {state.view === 'devices'     && hasProject && <DevicesView     data={state.projectData} onDeviceStatus={handleDeviceStatus} jumpTo={state.deviceJumpTo} onPin={handlePin} onAddDevice={handleAddDevice} />}
+          {state.view === 'devices'     && hasProject && <DevicesView     data={state.projectData} onDeviceStatus={handleDeviceStatus} jumpTo={state.deviceJumpTo} onPin={handlePin} onAddDevice={handleAddDevice} onUpdateDevice={handleUpdateDevice} />}
           {state.view === 'groups'      && hasProject && <GroupAddressesView data={state.projectData} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onWrite={handleWrite} onDeviceJump={handleDeviceJump} onPin={handlePin} onCreateGA={handleCreateGA} onDeleteGA={handleDeleteGA} onUpdateGA={handleUpdateGA} onRenameGAGroup={handleRenameGAGroup} jumpTo={state.gaJumpTo} />}
           {state.view === 'comobjects'     && hasProject && <ComObjectsView     data={state.projectData} onPin={handlePin} />}
           {state.view === 'manufacturers' && hasProject && <ManufacturersView  data={state.projectData} onAddDevice={handleAddDevice} />}
-          {state.view === 'locations'   && hasProject && <LocationsView   data={state.projectData} onPin={handlePin} dispatch={dispatch} onAddDevice={handleAddDevice} />}
+          {state.view === 'locations'   && hasProject && <LocationsView   data={state.projectData} onPin={handlePin} dispatch={dispatch} onAddDevice={handleAddDevice} onUpdateDevice={handleUpdateDevice} onUpdateSpace={handleUpdateSpace} />}
           {state.view === 'floorplan'   && hasProject && <FloorPlanView   data={state.projectData} activeProjectId={state.activeProjectId} onUpdateDevice={handleUpdateDevice} jumpTo={state.floorplanJumpTo} onAddDevice={handleAddDevice} />}
           {state.view === 'monitor'     && <BusMonitorView telegrams={state.telegrams} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onClear={handleClearTelegrams} onWrite={handleWrite} data={state.projectData} onPin={handlePin} />}
           {state.view === 'scan'        && <BusScanView scan={state.scan} busConnected={state.busStatus.connected} projectData={state.projectData} activeProjectId={state.activeProjectId} dispatch={dispatch} onAddDevice={handleAddScannedDevice} />}
