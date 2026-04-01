@@ -335,22 +335,35 @@ function AddMenu({ nodeId, nodeType, nodeName, C, onAddDevice, onAddSpace }) {
 const SPACE_TYPES = ['Building', 'Floor', 'Room', 'Corridor', 'Stairway', 'DistributionBoard'];
 
 function AddSpaceForm({ parentId, defaultType, C, onSave, onCancel }) {
+  const { t: i18t } = useContext(I18nCtx);
   const [name, setName] = useState('');
   const [type, setType] = useState(defaultType || 'Room');
+  const [usageId, setUsageId] = useState('');
   const [saving, setSaving] = useState(false);
+  const usages = spaceUsageMap();
+  const usageEntries = Object.entries(usages).sort((a, b) => a[1].localeCompare(b[1]));
   const save = async () => {
     if (!name.trim()) return;
     setSaving(true);
-    try { await onSave({ name: name.trim(), type, parent_id: parentId }); }
+    try { await onSave({ name: name.trim(), type, parent_id: parentId, usage_id: usageId }); }
     catch (_) {}
     setSaving(false);
   };
+  const selectStyle = { background: C.inputBg, border: `1px solid ${C.border2}`, borderRadius: 4, padding: '5px 8px', color: C.text, fontSize: 10, fontFamily: 'inherit' };
   return (
     <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, background: C.surface, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <select value={type} onChange={e => setType(e.target.value)}
-        style={{ background: C.inputBg, border: `1px solid ${C.border2}`, borderRadius: 4, padding: '5px 8px', color: C.text, fontSize: 10, fontFamily: 'inherit' }}>
+      <select value={type} onChange={e => { setType(e.target.value); if (e.target.value !== 'Room') setUsageId(''); }}
+        style={selectStyle}>
         {SPACE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
       </select>
+      {type === 'Room' && usageEntries.length > 0 && (
+        <select value={usageId} onChange={e => setUsageId(e.target.value)} style={selectStyle}>
+          <option value="">— Use —</option>
+          {usageEntries.map(([id, text]) => (
+            <option key={id} value={id}>{i18t(id) || text}</option>
+          ))}
+        </select>
+      )}
       <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" autoFocus
         onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
         style={{ background: C.inputBg, border: `1px solid ${C.border2}`, borderRadius: 4, padding: '5px 8px', color: C.text, fontSize: 10, fontFamily: 'inherit', flex: 1, minWidth: 120 }} />
