@@ -28,9 +28,9 @@ function etsTestMatch(val, tests) {
 function evalDynTree(dynTree, modArgs, getVal, params) {
   const active = new Set();
   function evalChoice(choice) {
-    // Skip choose if its controlling param isn't active — the param may only be
-    // visible under a different when-branch that isn't currently selected.
-    if (choice.paramRefId && !choice.accessNone && !active.has(choice.paramRefId)) return;
+    // Skip choose if controlling param is known visible but not active.
+    // Allow: accessNone params, params not in the model (TypeNone page markers), and active params.
+    if (choice.paramRefId && !choice.accessNone && params[choice.paramRefId] && !active.has(choice.paramRefId)) return;
     const raw = getVal(choice.paramRefId);
     const val = String(raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''));
     let matched = false, defItems = null;
@@ -228,7 +228,7 @@ export function DeviceParameters({ dev, projectId, C }) {
       if (item.type === 'rename' && item.refId && item.text) {
         blockRenames[item.refId] = item.text;
       } else if (item.type === 'choose') {
-        if (item.paramRefId && !item.accessNone && !activeParams.has(item.paramRefId)) continue;
+        if (item.paramRefId && !item.accessNone && params[item.paramRefId] && !activeParams.has(item.paramRefId)) continue;
         const raw = getVal(item.paramRefId);
         const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
         let matched = false, defItems = null;
@@ -267,7 +267,7 @@ export function DeviceParameters({ dev, projectId, C }) {
       } else if (item.type === 'choose') {
         // Choose at channel level — evaluate and walk matching when items
         // but using walkChannelItems so nested blocks also handle deferral
-        if (item.paramRefId && !item.accessNone && !activeParams.has(item.paramRefId)) continue;
+        if (item.paramRefId && !item.accessNone && params[item.paramRefId] && !activeParams.has(item.paramRefId)) continue;
         const raw = getVal(item.paramRefId);
         const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
         let matched = false, defWhenItems = null;
@@ -318,7 +318,7 @@ export function DeviceParameters({ dev, projectId, C }) {
           walkItems(item.items, blockLabel, args, mkPrefix, grpLabel);
         }
       } else if (item.type === 'choose') {
-        if (item.paramRefId && !item.accessNone && !activeParams.has(item.paramRefId)) continue;
+        if (item.paramRefId && !item.accessNone && params[item.paramRefId] && !activeParams.has(item.paramRefId)) continue;
         const raw = getVal(item.paramRefId);
         const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
         let matched = false, defItems = null;

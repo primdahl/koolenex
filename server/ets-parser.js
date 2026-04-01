@@ -768,8 +768,18 @@ function buildAppIndex(buf) {
               if (ctag === 'Columns') for (const c of ordChildren(child)) if (ordTag(c) === 'Column') columns.push({ id: ordA(c, 'Id'), text: T(ordA(c, 'Id'), 'Text') || ordA(c, 'Text') || ordA(c, 'Name'), width: ordA(c, 'Width') || undefined });
             }
           }
+          // Resolve block label: Translation > Text attr > ParamRefId param text > Name
+          let blockText = T(id, 'Text') || ordA(el, 'Text') || '';
+          if (!blockText) {
+            const prId = ordA(el, 'ParamRefId');
+            if (prId) {
+              const pr = paramRefDefs[prId];
+              const pd = pr ? paramDefs[pr.paramId] : null;
+              blockText = T(pr?.paramId, 'Text') || pr?.text || pd?.text || '';
+            }
+          }
           result.push({
-            type: 'block', id, text: T(id, 'Text') || ordA(el, 'Text') || '',
+            type: 'block', id, text: blockText,
             name: ordA(el, 'Name'), inline: ordA(el, 'Inline') === 'true', access: ordA(el, 'Access') || undefined,
             layout: ordA(el, 'Layout') || undefined, rows, columns,
             items: serOrderedItems(children),
