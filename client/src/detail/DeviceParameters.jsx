@@ -243,6 +243,54 @@ export function DeviceParameters({ dev, projectId, C }) {
     }
   }
 
+  // Special walk for channel children: defers Access=None block content
+  // to the next navigable block (matching ETS6 behavior where Access=None
+  // block params appear on the parent/group header page)
+  function walkChannelItems(items, chLabel, args, mkPrefix, grpLabel) {
+    if (!items) return;
+    let deferredItems = []; // items from Access=None blocks waiting for a home
+    for (const item of items) {
+      if (item.type === 'block' && item.access === 'None') {
+        // Access=None blocks: params are hidden (download-only) but still
+        // drive choose/when logic. Don't show their content.
+        collectRenames(item.items);
+      } else if (item.type === 'block' && !item.inline) {
+        // Navigable block — flush deferred items into this block's section
+        collectRenames(item.items);
+        const renamed = item.id ? blockRenames[item.id] : null;
+        const blockLabel = renamed || interpTpl(item.text, args) || item.text || item.name || chLabel;
+        // Walk deferred items first (they become part of this section)
+        walkItems(deferredItems, blockLabel, args, mkPrefix, grpLabel);
+        deferredItems = [];
+        // Then walk the block's own items
+        walkItems(item.items, blockLabel, args, mkPrefix, grpLabel);
+      } else if (item.type === 'choose') {
+        // Choose at channel level — evaluate and walk matching when items
+        // but using walkChannelItems so nested blocks also handle deferral
+        if (item.paramRefId && !item.accessNone && !activeParams.has(item.paramRefId)) continue;
+        const raw = getVal(item.paramRefId);
+        const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
+        let matched = false, defWhenItems = null;
+        for (const w of item.whens || []) {
+          if (w.isDefault) { defWhenItems = w.items; continue; }
+          if (etsTestMatch(val, w.test)) { matched = true; walkChannelItems(w.items, chLabel, args, mkPrefix, grpLabel); }
+        }
+        if (!matched && defWhenItems) walkChannelItems(defWhenItems, chLabel, args, mkPrefix, grpLabel);
+      } else {
+        // Other items (separator, paramRef, etc.) — add to deferred if we haven't found a block yet
+        if (deferredItems.length > 0 || item.type === 'separator' || item.type === 'paramRef') {
+          deferredItems.push(item);
+        } else {
+          walkItems([item], chLabel, args, mkPrefix, grpLabel);
+        }
+      }
+    }
+    // Any remaining deferred items without a block — use channel label
+    if (deferredItems.length > 0) {
+      walkItems(deferredItems, chLabel, args, mkPrefix, grpLabel);
+    }
+  }
+
   function walkItems(items, secLabel, args, mkPrefix, grpLabel) {
     if (!items) return;
     for (const item of items) {
@@ -288,7 +336,8 @@ export function DeviceParameters({ dev, projectId, C }) {
         }
         // Pre-collect renames from this channel's children
         collectRenames(item.items);
-        walkItems(item.items, chLabel, args, mkPrefix, chLabel);
+        // Walk channel items, deferring Access=None block content to the next navigable block
+        walkChannelItems(item.items, chLabel, args, mkPrefix, chLabel);
       } else if (item.type === 'cib') {
         walkItems(item.items, '', args, mkPrefix, grpLabel);
       }
