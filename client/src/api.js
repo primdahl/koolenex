@@ -61,6 +61,12 @@ export const api = {
   getCatalog:    (pid) => req('GET', `/projects/${pid}/catalog`),
   importKnxprod: (pid, formData) => req('POST', `/projects/${pid}/catalog/import`, formData, true),
 
+  // Topology
+  getTopology:    (pid) => req('GET', `/projects/${pid}/topology`),
+  createTopology: (pid, body) => req('POST', `/projects/${pid}/topology`, body),
+  updateTopology: (pid, tid, body) => req('PUT', `/projects/${pid}/topology/${tid}`, body),
+  deleteTopology: (pid, tid) => req('DELETE', `/projects/${pid}/topology/${tid}`),
+
   // Spaces
   createSpace:    (pid, body)      => req('POST', `/projects/${pid}/spaces`, body),
   updateSpace:    (pid, sid, body) => req('PUT', `/projects/${pid}/spaces/${sid}`, body),

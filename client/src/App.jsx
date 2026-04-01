@@ -367,6 +367,51 @@ export default function App() {
     });
   }, [state.activeProjectId, state.projectData, pushUndo]);
 
+  const handleCreateTopology = useCallback(async (body) => {
+    if (!state.activeProjectId) return null;
+    const entry = await api.createTopology(state.activeProjectId, body);
+    dispatch({ type: 'ADD_TOPOLOGY', entry });
+    const pid = state.activeProjectId;
+    pushUndo(`Create ${entry.line != null ? 'line' : 'area'} ${entry.line != null ? entry.area + '.' + entry.line : entry.area}`,
+      `"${entry.name || ''}"`, async () => {
+        await api.deleteTopology(pid, entry.id);
+        dispatch({ type: 'DELETE_TOPOLOGY', id: entry.id });
+      });
+    return entry;
+  }, [state.activeProjectId, pushUndo]);
+
+  const handleUpdateTopology = useCallback(async (topoId, patch) => {
+    if (!state.activeProjectId) return;
+    const prev = state.projectData?.topology?.find(t => t.id === topoId);
+    if (!prev) return;
+    const prevPatch = {};
+    for (const k of Object.keys(patch)) prevPatch[k] = prev[k] ?? '';
+    const detail = diffDetail(prev, patch);
+    await api.updateTopology(state.activeProjectId, topoId, patch);
+    dispatch({ type: 'PATCH_TOPOLOGY', id: topoId, patch });
+    const pid = state.activeProjectId;
+    pushUndo(`Edit ${prev.line != null ? 'line' : 'area'} ${prev.line != null ? prev.area + '.' + prev.line : prev.area}`,
+      detail, async () => {
+        await api.updateTopology(pid, topoId, prevPatch);
+        dispatch({ type: 'PATCH_TOPOLOGY', id: topoId, patch: prevPatch });
+      });
+  }, [state.activeProjectId, state.projectData, pushUndo]);
+
+  const handleDeleteTopology = useCallback(async (topoId) => {
+    if (!state.activeProjectId) return;
+    const entry = state.projectData?.topology?.find(t => t.id === topoId);
+    if (!entry) return;
+    await api.deleteTopology(state.activeProjectId, topoId);
+    dispatch({ type: 'DELETE_TOPOLOGY', id: topoId });
+    const pid = state.activeProjectId;
+    const body = { area: entry.area, line: entry.line, name: entry.name, medium: entry.medium };
+    pushUndo(`Delete ${entry.line != null ? 'line' : 'area'} ${entry.line != null ? entry.area + '.' + entry.line : entry.area}`,
+      `"${entry.name || ''}"`, async () => {
+        const restored = await api.createTopology(pid, body);
+        dispatch({ type: 'ADD_TOPOLOGY', entry: restored });
+      });
+  }, [state.activeProjectId, state.projectData, pushUndo]);
+
   const handleCreateSpace = useCallback(async (body) => {
     if (!state.activeProjectId) return null;
     const space = await api.createSpace(state.activeProjectId, body);
@@ -622,7 +667,7 @@ export default function App() {
           {state.view === 'projects' && <ProjectsView state={state} dispatch={dispatch} />}
           {state.view === 'settings' && <SettingsView theme={theme} onThemeChange={handleThemeChange} dptMode={dptMode} onDptModeChange={handleDptModeChange} />}
           {state.view === 'project'     && hasProject && <ProjectInfoView project={state.projects.find(p => p.id === state.activeProjectId)} data={state.projectData} lang={i18nLang} onLangChange={handleLangChange} languages={i18nData.languages} busStatus={state.busStatus} onConnect={handleConnect} onConnectUsb={handleConnectUsb} onDisconnect={handleDisconnect} />}
-          {state.view === 'topology'    && hasProject && <TopologyView    data={state.projectData} onPin={handlePin} busConnected={state.busStatus.connected} dispatch={dispatch} onAddDevice={handleAddDevice} />}
+          {state.view === 'topology'    && hasProject && <TopologyView    data={state.projectData} onPin={handlePin} busConnected={state.busStatus.connected} dispatch={dispatch} onAddDevice={handleAddDevice} activeProjectId={state.activeProjectId} onCreateTopology={handleCreateTopology} onUpdateTopology={handleUpdateTopology} onDeleteTopology={handleDeleteTopology} />}
           {state.view === 'devices'     && hasProject && <DevicesView     data={state.projectData} onDeviceStatus={handleDeviceStatus} jumpTo={state.deviceJumpTo} onPin={handlePin} onAddDevice={handleAddDevice} onUpdateDevice={handleUpdateDevice} dispatch={dispatch} />}
           {state.view === 'groups'      && hasProject && <GroupAddressesView data={state.projectData} busConnected={state.busStatus.connected} activeProjectId={state.activeProjectId} onWrite={handleWrite} onDeviceJump={handleDeviceJump} onPin={handlePin} onCreateGA={handleCreateGA} onDeleteGA={handleDeleteGA} onUpdateGA={handleUpdateGA} onRenameGAGroup={handleRenameGAGroup} jumpTo={state.gaJumpTo} />}
           {state.view === 'comobjects'     && hasProject && <ComObjectsView     data={state.projectData} onPin={handlePin} />}

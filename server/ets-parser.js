@@ -1209,16 +1209,19 @@ function parseKnxproj(buffer, password = null) {
     if (!topology) continue;
 
     const devInstById = {};  // DeviceInstance @Id → individual_address
+    const topologyEntries = [];  // { area, line (null for area-level), name, medium }
 
     for (const area of toArr(topology.Area)) {
       const areaNum  = parseInt(a(area,'Address')) || 0;
       const areaName = a(area,'Name');
+      topologyEntries.push({ area: areaNum, line: null, name: areaName || '', medium: 'TP' });
       for (const line of toArr(area.Line)) {
         const lineNum  = parseInt(a(line,'Address')) || 0;
         const lineName = a(line,'Name');
         const mediumAttr = a(line,'MediumTypeRefId') || a(line,'Medium') || a(line,'DomainAddress') || '';
         const mediumFromName = (() => { const n = lineName.toUpperCase(); if (n.includes(' RF') || n.startsWith('RF ')) return 'RF'; if (n.includes(' PL')) return 'PL'; if (n.includes(' IP')) return 'IP'; return ''; })();
         const medium = mediumAttr || mediumFromName || 'TP';
+        topologyEntries.push({ area: areaNum, line: lineNum, name: lineName || '', medium });
 
         const allDevs = [
           ...toArr(line.DeviceInstance),
@@ -1517,7 +1520,7 @@ function parseKnxproj(buffer, password = null) {
     try { thumbnail = jpgEntry.getData().toString('base64'); } catch (_) {}
   }
 
-  return { projectName, devices, groupAddresses, comObjects, links: uLinks, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems };
+  return { projectName, devices, groupAddresses, comObjects, links: uLinks, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems, topologyEntries };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

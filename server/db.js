@@ -187,6 +187,35 @@ async function init() {
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_addr_map', '')`);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS topology (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      area       INTEGER NOT NULL,
+      line       INTEGER,
+      name       TEXT DEFAULT '',
+      medium     TEXT DEFAULT 'TP',
+      UNIQUE(project_id, area, line)
+    )
+  `);
+
+  // Migrate existing area/line data from devices into topology table
+  try {
+    const hasRows = all('SELECT count(*) as c FROM topology').c;
+    if (!hasRows) {
+      // Migrate areas
+      const areas = all("SELECT DISTINCT project_id, area, area_name FROM devices WHERE area_name != '' AND area_name IS NOT NULL");
+      for (const r of areas) {
+        try { db.run('INSERT OR IGNORE INTO topology (project_id, area, line, name, medium) VALUES (?,?,NULL,?,?)', [r.project_id, r.area, r.area_name, 'TP']); } catch (_) {}
+      }
+      // Migrate lines
+      const lines = all("SELECT DISTINCT project_id, area, line, line_name, medium FROM devices");
+      for (const r of lines) {
+        try { db.run('INSERT OR IGNORE INTO topology (project_id, area, line, name, medium) VALUES (?,?,?,?,?)', [r.project_id, r.area, r.line, r.line_name || '', r.medium || 'TP']); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS catalog_sections (
       id         TEXT NOT NULL,
       project_id INTEGER NOT NULL,
@@ -405,7 +434,25 @@ function getProjectFull(projectId) {
     [projectId]
   );
 
-  return { project, devices, gas: normGas, comObjects, deviceGAMap, gaDeviceMap, spaces };
+  const topoRows = all(
+    'SELECT * FROM topology WHERE project_id=? ORDER BY area, line',
+    [projectId]
+  );
+  // Build lookup for area/line names
+  const areaNameMap = {};   // area → name
+  const lineNameMap = {};   // "area.line" → { name, medium }
+  for (const t of topoRows) {
+    if (t.line === null) areaNameMap[t.area] = t.name;
+    else lineNameMap[`${t.area}.${t.line}`] = { name: t.name, medium: t.medium };
+  }
+  // Attach topology names to devices
+  const devicesWithTopo = devices.map(d => ({
+    ...d,
+    area_name: areaNameMap[d.area] || d.area_name || '',
+    line_name: lineNameMap[`${d.area}.${d.line}`]?.name || d.line_name || '',
+  }));
+
+  return { project, devices: devicesWithTopo, gas: normGas, comObjects, deviceGAMap, gaDeviceMap, spaces, topology: topoRows };
 }
 
 /**

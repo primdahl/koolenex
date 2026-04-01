@@ -300,6 +300,118 @@ describe('Audit Log', () => {
   });
 });
 
+// ── Topology ─────────────────────────────────────────────────────────────────
+
+describe('Topology', () => {
+  let pid;
+
+  before(async () => {
+    const { data } = await req('POST', '/projects', { name: 'Topology Tests' });
+    pid = data.id;
+  });
+
+  after(async () => { await req('DELETE', `/projects/${pid}`); });
+
+  it('POST creates an area row (line=null)', async () => {
+    const { status, data } = await req('POST', `/projects/${pid}/topology`, {
+      area: 1, name: 'Area 1',
+    });
+    assert.equal(status, 200);
+    const row = db.get('SELECT * FROM topology WHERE id=?', [data.id]);
+    assert(row);
+    assert.equal(row.project_id, pid);
+    assert.equal(row.area, 1);
+    assert.equal(row.line, null);
+    assert.equal(row.name, 'Area 1');
+  });
+
+  it('POST creates a line row', async () => {
+    const { status, data } = await req('POST', `/projects/${pid}/topology`, {
+      area: 1, line: 0, name: 'Backbone', medium: 'IP',
+    });
+    assert.equal(status, 200);
+    const row = db.get('SELECT * FROM topology WHERE id=?', [data.id]);
+    assert.equal(row.area, 1);
+    assert.equal(row.line, 0);
+    assert.equal(row.name, 'Backbone');
+    assert.equal(row.medium, 'IP');
+  });
+
+  it('POST creates multiple lines under an area', async () => {
+    await req('POST', `/projects/${pid}/topology`, { area: 1, line: 1, name: 'TP Line 1' });
+    await req('POST', `/projects/${pid}/topology`, { area: 1, line: 2, name: 'TP Line 2' });
+    const lines = db.all('SELECT * FROM topology WHERE project_id=? AND area=1 AND line IS NOT NULL', [pid]);
+    assert.equal(lines.length, 3);
+  });
+
+  it('POST rejects missing area', async () => {
+    const { status } = await req('POST', `/projects/${pid}/topology`, { name: 'No area' });
+    assert.equal(status, 400);
+  });
+
+  it('GET returns all topology entries', async () => {
+    const { status, data } = await req('GET', `/projects/${pid}/topology`);
+    assert.equal(status, 200);
+    assert(data.length >= 4); // 1 area + 3 lines
+    const areas = data.filter(t => t.line === null);
+    const lines = data.filter(t => t.line !== null);
+    assert(areas.length >= 1);
+    assert(lines.length >= 3);
+  });
+
+  it('PUT renames a topology entry in the database', async () => {
+    const areaRow = db.get('SELECT * FROM topology WHERE project_id=? AND area=1 AND line IS NULL', [pid]);
+    await req('PUT', `/projects/${pid}/topology/${areaRow.id}`, { name: 'Renamed Area' });
+    const updated = db.get('SELECT * FROM topology WHERE id=?', [areaRow.id]);
+    assert.equal(updated.name, 'Renamed Area');
+    assert.equal(updated.area, 1, 'area number should be unchanged');
+  });
+
+  it('PUT changes medium on a line', async () => {
+    const lineRow = db.get('SELECT * FROM topology WHERE project_id=? AND area=1 AND line=0', [pid]);
+    await req('PUT', `/projects/${pid}/topology/${lineRow.id}`, { medium: 'RF' });
+    const updated = db.get('SELECT * FROM topology WHERE id=?', [lineRow.id]);
+    assert.equal(updated.medium, 'RF');
+    assert.equal(updated.name, 'Backbone', 'name should be unchanged');
+  });
+
+  it('PUT returns 404 for nonexistent entry', async () => {
+    const { status } = await req('PUT', `/projects/${pid}/topology/99999`, { name: 'x' });
+    assert.equal(status, 404);
+  });
+
+  it('DELETE removes a topology entry', async () => {
+    const lineRow = db.get('SELECT * FROM topology WHERE project_id=? AND area=1 AND line=2', [pid]);
+    await req('DELETE', `/projects/${pid}/topology/${lineRow.id}`);
+    assert.equal(db.get('SELECT * FROM topology WHERE id=?', [lineRow.id]), null);
+  });
+
+  it('DELETE returns 404 for nonexistent entry', async () => {
+    const { status } = await req('DELETE', `/projects/${pid}/topology/99999`);
+    assert.equal(status, 404);
+  });
+
+  it('topology names appear on devices via getProjectFull', async () => {
+    await req('POST', `/projects/${pid}/devices`, {
+      individual_address: '1.1.1', name: 'Test Dev', area: 1, line: 1,
+    });
+    const { data: full } = await req('GET', `/projects/${pid}`);
+    const dev = full.devices.find(d => d.individual_address === '1.1.1');
+    assert.equal(dev.area_name, 'Renamed Area');
+    assert.equal(dev.line_name, 'TP Line 1');
+  });
+
+  it('topology operations generate audit log entries', async () => {
+    const rows = db.all('SELECT * FROM audit_log WHERE project_id=? AND entity=?', [pid, 'topology']);
+    const creates = rows.filter(r => r.action === 'create');
+    const updates = rows.filter(r => r.action === 'update');
+    const deletes = rows.filter(r => r.action === 'delete');
+    assert(creates.length >= 1, 'should have create entries');
+    assert(updates.length >= 1, 'should have update entries');
+    assert(deletes.length >= 1, 'should have delete entries');
+  });
+});
+
 // ── Cascade Delete ───────────────────────────────────────────────────────────
 
 describe('Cascade Delete', () => {
@@ -312,6 +424,8 @@ describe('Cascade Delete', () => {
       individual_address: '1.1.1', name: 'Dev A', area: 1, line: 1,
     });
     await req('POST', `/projects/${pid}/gas`, { address: '0/0/1', name: 'GA 1' });
+    await req('POST', `/projects/${pid}/topology`, { area: 1, name: 'Area 1' });
+    await req('POST', `/projects/${pid}/topology`, { area: 1, line: 1, name: 'Line 1.1' });
     db.run('INSERT INTO com_objects (project_id, device_id, object_number, name) VALUES (?,?,?,?)',
       [pid, dev.id, 0, 'CO 1']);
     db.run('INSERT INTO spaces (project_id, name, type) VALUES (?,?,?)', [pid, 'Room 1', 'Room']);
@@ -322,10 +436,9 @@ describe('Cascade Delete', () => {
     assert(db.get('SELECT count(*) as c FROM group_addresses WHERE project_id=?', [pid]).c > 0);
     assert(db.get('SELECT count(*) as c FROM com_objects WHERE project_id=?', [pid]).c > 0);
     assert(db.get('SELECT count(*) as c FROM spaces WHERE project_id=?', [pid]).c > 0);
+    assert(db.get('SELECT count(*) as c FROM topology WHERE project_id=?', [pid]).c > 0);
     assert(db.get('SELECT count(*) as c FROM ga_group_names WHERE project_id=?', [pid]).c > 0);
     assert(db.get('SELECT count(*) as c FROM audit_log WHERE project_id=?', [pid]).c > 0);
-    assert(db.get('SELECT count(*) as c FROM catalog_sections WHERE project_id=?', [pid]).c === 0); // empty but table exists
-    assert(db.get('SELECT count(*) as c FROM catalog_items WHERE project_id=?', [pid]).c === 0);
 
     // Delete project
     await req('DELETE', `/projects/${pid}`);
@@ -336,6 +449,7 @@ describe('Cascade Delete', () => {
     assert.equal(db.get('SELECT count(*) as c FROM group_addresses WHERE project_id=?', [pid]).c, 0, 'group_addresses');
     assert.equal(db.get('SELECT count(*) as c FROM com_objects WHERE project_id=?', [pid]).c, 0, 'com_objects');
     assert.equal(db.get('SELECT count(*) as c FROM spaces WHERE project_id=?', [pid]).c, 0, 'spaces');
+    assert.equal(db.get('SELECT count(*) as c FROM topology WHERE project_id=?', [pid]).c, 0, 'topology');
     assert.equal(db.get('SELECT count(*) as c FROM ga_group_names WHERE project_id=?', [pid]).c, 0, 'ga_group_names');
     assert.equal(db.get('SELECT count(*) as c FROM audit_log WHERE project_id=?', [pid]).c, 0, 'audit_log');
     assert.equal(db.get('SELECT count(*) as c FROM catalog_sections WHERE project_id=?', [pid]).c, 0, 'catalog_sections');

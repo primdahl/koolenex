@@ -142,6 +142,21 @@ export function reducer(state, action) {
       const devices = state.projectData.devices.map(d => d.space_id === action.id ? { ...d, space_id: null } : d);
       return { ...state, projectData: { ...state.projectData, spaces, devices } };
     }
+    case 'ADD_TOPOLOGY': {
+      if (!state.projectData) return state;
+      const topology = [...(state.projectData.topology || []), action.entry];
+      return { ...state, projectData: { ...state.projectData, topology } };
+    }
+    case 'PATCH_TOPOLOGY': {
+      if (!state.projectData) return state;
+      const topology = (state.projectData.topology || []).map(t => t.id === action.id ? { ...t, ...action.patch } : t);
+      return { ...state, projectData: { ...state.projectData, topology } };
+    }
+    case 'DELETE_TOPOLOGY': {
+      if (!state.projectData) return state;
+      const topology = (state.projectData.topology || []).filter(t => t.id !== action.id);
+      return { ...state, projectData: { ...state.projectData, topology } };
+    }
     case 'DELETE_GA': {
       if (!state.projectData) return state;
       const gas = state.projectData.gas.filter(g => g.id !== action.id);

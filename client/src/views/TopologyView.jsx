@@ -7,14 +7,15 @@ import { api } from '../api.js';
 
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function TopologyView({ data, onPin, busConnected, dispatch, onAddDevice }) {
+export function TopologyView({ data, onPin, busConnected, dispatch, onAddDevice, activeProjectId, onUpdateTopology, onCreateTopology, onDeleteTopology }) {
   const C = useC();
   const mediumTypes = useContext(MediumCtx);
   const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem('knx-topo-collapsed') || '{}'); } catch { return {}; } });
   useEffect(() => { try { localStorage.setItem('knx-topo-collapsed', JSON.stringify(collapsed)); } catch {} }, [collapsed]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [addDefaults, setAddDefaults] = useState(null);
-  const { devices = [], deviceGAMap = {}, spaces = [] } = data || {};
+  const [editTopoId, setEditTopoId] = useState(null);
+  const { devices = [], deviceGAMap = {}, spaces = [], topology = [] } = data || {};
 
   const TOPO_COLS = useMemo(() => [
     { id: 'individual_address', label: 'Address',      visible: true },
@@ -40,7 +41,12 @@ export function TopologyView({ data, onPin, busConnected, dispatch, onAddDevice 
     return parts.join(' › ');
   };
 
-  const areas = [...new Set(devices.map(d => d.area))].sort((a, b) => a - b);
+  // Build topology structure from the topology table
+  const areaRows = topology.filter(t => t.line === null).sort((a, b) => a.area - b.area);
+  const lineRows = topology.filter(t => t.line !== null);
+  // Also discover areas/lines from devices that might not have topology rows yet
+  const allAreas = [...new Set([...areaRows.map(t => t.area), ...devices.map(d => d.area)])].sort((a, b) => a - b);
+
   const toggleLine = (area, line) => setCollapsed(p => ({ ...p, [`${area}.${line}`]: !p[`${area}.${line}`] }));
 
   const exportTopoCSV = () => {
@@ -61,34 +67,86 @@ export function TopologyView({ data, onPin, busConnected, dispatch, onAddDevice 
       <SectionHeader title="Topology" count={devices.length} actions={[
         <ColumnPicker key="cp" cols={topoCols} onChange={saveTopoCols} C={C} />,
         <Btn key="csv" onClick={exportTopoCSV} color={C.muted} bg={C.surface}>↓ CSV</Btn>,
+        ...(onCreateTopology ? [<Btn key="add" onClick={() => {
+          const nextArea = allAreas.length ? Math.max(...allAreas) + 1 : 1;
+          onCreateTopology({ area: nextArea, name: `Area ${nextArea}` });
+        }} color={C.green} bg={C.surface}>+ Area</Btn>] : []),
       ]} />
       <div style={{ overflow: 'auto', flex: 1 }}>
-        {areas.map(area => {
-          const lines = [...new Set(devices.filter(d => d.area === area).map(d => d.line))].sort((a, b) => a - b);
+        {allAreas.map(area => {
+          const areaRow = areaRows.find(t => t.area === area);
+          const areaName = areaRow?.name || '';
+          const lines = [...new Set([
+            ...lineRows.filter(t => t.area === area).map(t => t.line),
+            ...devices.filter(d => d.area === area).map(d => d.line),
+          ])].sort((a, b) => a - b);
           const areaDevs = devices.filter(d => d.area === area && (statusFilter === 'all' || d.status === statusFilter));
           return (
             <div key={`area-${area}`}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', background: C.surface, borderBottom: `1px solid ${C.border}` }}>
-                <span style={{ color: C.accent, fontSize: 11, fontWeight: 600 }}>AREA {area}</span>
+                {editTopoId === areaRow?.id ? (
+                  <InlineEdit initial={areaName} fontSize={11}
+                    onSave={async (v) => { await onUpdateTopology(areaRow.id, { name: v }); setEditTopoId(null); }}
+                    onCancel={() => setEditTopoId(null)} C={C} />
+                ) : (
+                  <>
+                    <span style={{ color: C.accent, fontSize: 11, fontWeight: 600 }}>AREA {area}</span>
+                    {areaName && <span style={{ color: C.accent, fontSize: 11, fontWeight: 600 }}>— {areaName}</span>}
+                    {!areaName && onUpdateTopology && areaRow && <span onClick={(e) => { e.stopPropagation(); setEditTopoId(areaRow.id); }}
+                      style={{ color: C.dim, fontSize: 9, cursor: 'pointer', fontStyle: 'italic' }}>+ name</span>}
+                    {areaName && onUpdateTopology && areaRow && <span onClick={(e) => { e.stopPropagation(); setEditTopoId(areaRow.id); }}
+                      title="Rename" style={{ color: C.dim, fontSize: 9, cursor: 'pointer', opacity: 0.5 }} className="bg">edit</span>}
+                  </>
+                )}
                 <span style={{ color: C.dim, fontSize: 10 }}>· {areaDevs.length} devices · {lines.length} lines</span>
+                {onCreateTopology && (
+                  <span onClick={() => { const nextLine = lines.length ? Math.max(...lines) + 1 : 1; onCreateTopology({ area, line: nextLine, name: '' }); }}
+                    title="Add a new line to this area"
+                    style={{ color: C.green, fontSize: 13, cursor: 'pointer', opacity: 0.7, lineHeight: 1 }}>+</span>
+                )}
+                {onDeleteTopology && areaRow && areaDevs.length === 0 && (
+                  <span onClick={() => onDeleteTopology(areaRow.id)}
+                    title={`Delete Area ${area}`}
+                    style={{ color: C.red, fontSize: 13, cursor: 'pointer', opacity: 0.5, lineHeight: 1 }}>−</span>
+                )}
               </div>
               {lines.map(line => {
+                const lineRow = lineRows.find(t => t.area === area && t.line === line);
+                const lineName = lineRow?.name || '';
                 const devs = devices.filter(d => d.area === area && d.line === line && (statusFilter === 'all' || d.status === statusFilter));
                 const isCollapsed = !!collapsed[`${area}.${line}`];
-                const medium = devices.find(d => d.area === area && d.line === line)?.medium || 'TP';
+                const medium = lineRow?.medium || devices.find(d => d.area === area && d.line === line)?.medium || 'TP';
                 const mediumColor = { TP: C.green, RF: C.amber, IP: C.accent, PL: C.purple }[medium] || C.dim;
                 return (
                   <div key={`line-${area}-${line}`}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px 5px 28px', background: C.hover, borderBottom: `1px solid ${C.border}` }}>
                       <span onClick={() => toggleLine(area, line)} style={{ fontSize: 9, color: C.dim, width: 14, cursor: 'pointer', userSelect: 'none' }}>{isCollapsed ? '▸' : '▾'}</span>
-                      <span style={{ color: C.text, fontSize: 10, fontWeight: 500 }}>Line {area}.{line}</span>
+                      {editTopoId === lineRow?.id ? (
+                        <InlineEdit initial={lineName} fontSize={10}
+                          onSave={async (v) => { await onUpdateTopology(lineRow.id, { name: v }); setEditTopoId(null); }}
+                          onCancel={() => setEditTopoId(null)} C={C} />
+                      ) : (
+                        <>
+                          <span style={{ color: C.text, fontSize: 10, fontWeight: 500 }}>Line {area}.{line}</span>
+                          {lineName && <span style={{ color: C.text, fontSize: 10 }}>— {lineName}</span>}
+                          {!lineName && onUpdateTopology && lineRow && <span onClick={(e) => { e.stopPropagation(); setEditTopoId(lineRow.id); }}
+                            style={{ color: C.dim, fontSize: 9, cursor: 'pointer', fontStyle: 'italic' }}>+ name</span>}
+                          {lineName && onUpdateTopology && lineRow && <span onClick={(e) => { e.stopPropagation(); setEditTopoId(lineRow.id); }}
+                            title="Rename" style={{ color: C.dim, fontSize: 9, cursor: 'pointer', opacity: 0.5 }} className="bg">edit</span>}
+                        </>
+                      )}
                       <Badge label={medium} color={mediumColor} title={mediumTypes[medium] || medium} />
                       <span style={{ color: C.dim, fontSize: 10 }}>· {devs.length}</span>
                       {(() => { const mA = devs.reduce((s, d) => s + (d.bus_current || 0), 0); return mA > 0 ? <span style={{ color: C.dim, fontSize: 10 }}>· {mA} mA</span> : null; })()}
                       {onAddDevice && (
                         <span onClick={e => { e.stopPropagation(); setAddDefaults({ area, line, medium }); }}
                           title="Add device to this line"
-                          style={{ color: C.green, fontSize: 9, cursor: 'pointer', opacity: 0.7 }}>+</span>
+                          style={{ color: C.green, fontSize: 13, cursor: 'pointer', opacity: 0.7, lineHeight: 1 }}>+</span>
+                      )}
+                      {onDeleteTopology && lineRow && devs.length === 0 && (
+                        <span onClick={() => onDeleteTopology(lineRow.id)}
+                          title={`Delete Line ${area}.${line}`}
+                          style={{ color: C.red, fontSize: 13, cursor: 'pointer', opacity: 0.5, lineHeight: 1 }}>−</span>
                       )}
                       {busConnected && dispatch && (
                         <span onClick={e => { e.stopPropagation(); dispatch({ type: 'SCAN_RESET' }); dispatch({ type: 'SET_VIEW', view: 'scan' }); api.busScan(area, line, 200); }}
@@ -136,7 +194,7 @@ export function TopologyView({ data, onPin, busConnected, dispatch, onAddDevice 
             </div>
           );
         })}
-        {devices.length === 0 && <Empty icon="⬡" msg="No devices" />}
+        {devices.length === 0 && allAreas.length === 0 && <Empty icon="⬡" msg="No devices or topology" />}
       </div>
       <div style={{ padding: '5px 14px', borderTop: `1px solid ${C.border}`, fontSize: 10, color: C.dim, display: 'flex', gap: 14 }}>
         {Object.entries(STATUS_COLOR).map(([s, c]) => (
@@ -147,6 +205,26 @@ export function TopologyView({ data, onPin, busConnected, dispatch, onAddDevice 
         ))}
       </div>
       {addDefaults && onAddDevice && <AddDeviceModal data={data} defaults={addDefaults} onAdd={onAddDevice} onClose={() => setAddDefaults(null)} />}
+    </div>
+  );
+}
+
+function InlineEdit({ initial, fontSize = 11, onSave, onCancel, C }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!value.trim()) return;
+    setSaving(true);
+    try { await onSave(value.trim()); } catch (_) {}
+    setSaving(false);
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
+      <input value={value} onChange={e => setValue(e.target.value)} autoFocus
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onCancel(); }}
+        style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '2px 6px', color: C.text, fontSize, fontFamily: 'inherit', flex: 1, minWidth: 80 }} />
+      <Btn onClick={save} disabled={saving || !value.trim()} color={C.green}>{saving ? 'Saving' : 'Save'}</Btn>
+      <Btn onClick={onCancel} color={C.dim}>Cancel</Btn>
     </div>
   );
 }

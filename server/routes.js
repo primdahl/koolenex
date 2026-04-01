@@ -291,6 +291,7 @@ router.delete('/projects/:id', (req, res) => {
     }
     run('DELETE FROM bus_telegrams WHERE project_id=?', [pid]);
     run('DELETE FROM ga_group_names WHERE project_id=?', [pid]);
+    run('DELETE FROM topology WHERE project_id=?', [pid]);
     run('DELETE FROM catalog_sections WHERE project_id=?', [pid]);
     run('DELETE FROM catalog_items WHERE project_id=?', [pid]);
     run('DELETE FROM audit_log WHERE project_id=?', [pid]);
@@ -318,7 +319,7 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
     return res.status(422).json({ error: `Parse failed: ${err.message}` });
   }
 
-  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems } = parsed;
+  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems, topologyEntries } = parsed;
 
   try {
     const projectId = db.transaction(({ run, all }) => {
@@ -387,6 +388,12 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
            co.ga_send||'', co.ga_receive||'']);
       }
 
+      // Insert topology
+      for (const t of (topologyEntries || [])) {
+        run('INSERT OR REPLACE INTO topology (project_id, area, line, name, medium) VALUES (?,?,?,?,?)',
+          [pid, t.area, t.line, t.name || '', t.medium || 'TP']);
+      }
+
       // Insert catalog sections and items
       for (const sec of (catalogSections || [])) {
         run('INSERT OR REPLACE INTO catalog_sections (id,project_id,name,number,parent_id,mfr_id,manufacturer) VALUES (?,?,?,?,?,?,?)',
@@ -450,7 +457,7 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
     return res.status(422).json({ error: `Parse failed: ${err.message}` });
   }
 
-  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems } = parsed;
+  const { projectName, devices, groupAddresses, comObjects, links, spaces, devSpaceMap, paramModels, thumbnail, projectInfo, knxMasterXml, catalogSections, catalogItems, topologyEntries } = parsed;
 
   try {
     db.transaction(({ run, all }) => {
@@ -459,6 +466,7 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
       run('DELETE FROM com_objects WHERE project_id=?', [pid]);
       run('DELETE FROM group_addresses WHERE project_id=?', [pid]);
       run('DELETE FROM devices WHERE project_id=?', [pid]);
+      run('DELETE FROM topology WHERE project_id=?', [pid]);
       run('DELETE FROM catalog_sections WHERE project_id=?', [pid]);
       run('DELETE FROM catalog_items WHERE project_id=?', [pid]);
       run('DELETE FROM spaces WHERE project_id=?', [pid]);
@@ -526,6 +534,12 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
           [pid, devId, co.object_number||0, co.channel||'', co.name||'', co.function_text||'',
            co.dpt||'', co.object_size||'', co.flags||'CW', co.direction||'both', co.ga_address||'',
            co.ga_send||'', co.ga_receive||'']);
+      }
+
+      // Re-insert topology
+      for (const t of (topologyEntries || [])) {
+        run('INSERT OR REPLACE INTO topology (project_id, area, line, name, medium) VALUES (?,?,?,?,?)',
+          [pid, t.area, t.line, t.name || '', t.medium || 'TP']);
       }
 
       // Re-insert catalog
@@ -768,6 +782,54 @@ router.put('/projects/:pid/gas/:gid', (req, res) => {
   vals.push(+gid);
   db.run(`UPDATE group_addresses SET ${sets.join(', ')} WHERE id=?`, vals);
   db.audit(+pid, 'update', 'group_address', oldGA.address || gid, diffs.join('; '));
+  db.scheduleSave();
+  res.json({ ok: true });
+});
+
+// ── Topology ─────────────────────────────────────────────────────────────────
+router.get('/projects/:pid/topology', (req, res) => {
+  res.json(db.all('SELECT * FROM topology WHERE project_id=? ORDER BY area, line', [+req.params.pid]));
+});
+
+router.post('/projects/:pid/topology', (req, res) => {
+  const pid = +req.params.pid;
+  const { area, line, name, medium } = req.body;
+  if (area === undefined) return res.status(400).json({ error: 'area required' });
+  const { lastInsertRowid } = db.run(
+    'INSERT OR REPLACE INTO topology (project_id, area, line, name, medium) VALUES (?,?,?,?,?)',
+    [pid, area, line ?? null, name || '', medium || 'TP']
+  );
+  const label = line != null ? `${area}.${line}` : `Area ${area}`;
+  db.audit(pid, 'create', 'topology', label, `Created ${line != null ? 'line' : 'area'} "${name || label}"`);
+  db.scheduleSave();
+  res.json(db.get('SELECT * FROM topology WHERE id=?', [lastInsertRowid]));
+});
+
+router.put('/projects/:pid/topology/:tid', (req, res) => {
+  const { pid, tid } = req.params;
+  const b = req.body;
+  const old = db.get('SELECT * FROM topology WHERE id=? AND project_id=?', [+tid, +pid]);
+  if (!old) return res.status(404).json({ error: 'Not found' });
+  const sets = [], vals = [], diffs = [];
+  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  if (b.name !== undefined) track('name', b.name);
+  if (b.medium !== undefined) track('medium', b.medium);
+  if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+  vals.push(+tid);
+  db.run(`UPDATE topology SET ${sets.join(', ')} WHERE id=?`, vals);
+  const label = old.line != null ? `${old.area}.${old.line}` : `Area ${old.area}`;
+  db.audit(+pid, 'update', 'topology', label, diffs.join('; '));
+  db.scheduleSave();
+  res.json({ ok: true });
+});
+
+router.delete('/projects/:pid/topology/:tid', (req, res) => {
+  const { pid, tid } = req.params;
+  const old = db.get('SELECT * FROM topology WHERE id=? AND project_id=?', [+tid, +pid]);
+  if (!old) return res.status(404).json({ error: 'Not found' });
+  db.run('DELETE FROM topology WHERE id=?', [+tid]);
+  const label = old.line != null ? `${old.area}.${old.line}` : `Area ${old.area}`;
+  db.audit(+pid, 'delete', 'topology', label, `Deleted ${old.line != null ? 'line' : 'area'} "${old.name || label}"`);
   db.scheduleSave();
   res.json({ ok: true });
 });
