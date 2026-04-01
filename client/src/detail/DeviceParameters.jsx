@@ -28,32 +28,28 @@ function etsTestMatch(val, tests) {
 function evalDynTree(dynTree, modArgs, getVal, params) {
   const active = new Set();
   function evalChoice(choice) {
-    // getVal may return '' for access=None params not in currentValues.
-    // Fall back to choice.defaultValue (from Parameter.@Value in the app XML).
+    // Skip choose if its controlling param isn't active — the param may only be
+    // visible under a different when-branch that isn't currently selected.
+    if (choice.paramRefId && !choice.accessNone && !active.has(choice.paramRefId)) return;
     const raw = getVal(choice.paramRefId);
     const val = String(raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''));
-    let matched = false, defNode = null;
+    let matched = false, defItems = null;
     for (const w of choice.whens || []) {
-      if (w.isDefault) { defNode = w.node; continue; }
-      if (etsTestMatch(val, w.test)) { matched = true; walkNode(w.node); }
+      if (w.isDefault) { defItems = w.items; continue; }
+      if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items); }
     }
-    if (!matched && defNode) walkNode(defNode);
+    if (!matched && defItems) walkItems(defItems);
   }
-  function walkNode(node) {
-    if (!node) return;
-    for (const r of node.paramRefs || []) active.add(r);
-    for (const b of node.blocks || []) walkNode(b);
-    for (const choice of node.choices || []) evalChoice(choice);
+  function walkItems(items) {
+    if (!items) return;
+    for (const item of items) {
+      if (item.type === 'paramRef') active.add(item.refId);
+      else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') walkItems(item.items);
+      else if (item.type === 'choose') evalChoice(item);
+    }
   }
-  function walkDynSection(section) {
-    if (!section) return;
-    for (const ch of section.channels || []) walkNode(ch.node);
-    for (const ci of section.cib || []) walkNode(ci);
-    for (const pb of section.pb || []) walkNode(pb);
-    for (const choice of section.choices || []) evalChoice(choice);
-  }
-  walkDynSection(dynTree?.main);
-  for (const md of dynTree?.moduleDefs || []) walkDynSection(md);
+  walkItems(dynTree?.main?.items);
+  for (const md of dynTree?.moduleDefs || []) walkItems(md.items);
   return active;
 }
 
@@ -186,23 +182,25 @@ export function DeviceParameters({ dev, projectId, C }) {
   const secIndentMap = {};  // key → leading-space indent count (from ETS Text convention)
   const secLabelMap  = {};  // key → display label (stripped)
 
-  function addItem(secLabel, instanceKey, prKey, args) {
-    if (!params[prKey] || !activeParams.has(prKey)) return;
-    const meta = params[prKey];
-    const grpTpl = meta.group || '';
-    const grp = grpTpl ? (interpTpl(grpTpl, args) || grpTpl) : '';
-    // ETS encodes hierarchy via leading spaces in ParameterBlock Text (stripped by parser, but
-    // indent count stored separately as sectionIndent).
-    const indent = meta.sectionIndent || 0;
-    // Composite key: group\0section — prevents collisions between same-named sections in different groups
-    const key = `${grp}\0${secLabel}`;
+  const secTableLayouts = {};
+
+  function ensureSection(secLabel, grp) {
+    const key = `${grp || ''}\0${secLabel}`;
     if (!secMap[key]) {
       secMap[key] = [];
       sections.push(key);
-      secGroupMap[key]  = grp;
-      secIndentMap[key] = indent;
+      secGroupMap[key]  = grp || '';
+      secIndentMap[key] = 0;
       secLabelMap[key]  = secLabel;
     }
+    return key;
+  }
+
+  function addItem(secLabel, instanceKey, prKey, args, cell, grp) {
+    if (!params[prKey] || !activeParams.has(prKey)) return;
+    const meta = params[prKey];
+    const effectiveGrp = grp !== undefined ? grp : (meta.group ? (interpTpl(meta.group, args) || meta.group) : '');
+    const key = ensureSection(secLabel, effectiveGrp);
     if (!secMap[key].some(x => x.instanceKey === instanceKey)) {
       secMap[key].push({
         instanceKey, prKey,
@@ -210,42 +208,94 @@ export function DeviceParameters({ dev, projectId, C }) {
         typeKind: meta.typeKind, enums: meta.enums, min: meta.min, max: meta.max, step: meta.step,
         uiHint: meta.uiHint || '', unit: meta.unit || '',
         defaultValue: meta.defaultValue, readOnly: meta.readOnly,
+        cell: cell || undefined,
       });
     }
   }
 
-  function walkNode(node, secLabel, args, mkPrefix) {
-    if (!node) return;
-    for (const prKey of node.paramRefs || []) {
-      const instanceKey = mkPrefix ? mkPrefix + prKey.replace(/^[^_]*_/, '_') : prKey;
-      const meta = params[prKey];
-      const sec = interpTpl(meta?.section || '', args) || secLabel || '';
-      addItem(sec, instanceKey, prKey, args);
+  function addSeparator(secLabel, item, grp) {
+    const key = ensureSection(secLabel, grp);
+    secMap[key].push({ type: 'separator', text: item.text, uiHint: item.uiHint });
+  }
+
+  // Track Rename: blockId → new display text (set by Rename elements inside active when-branches)
+  const blockRenames = {};
+
+  // Pre-scan items for active Renames, evaluating choose/when to find which branch fires
+  function collectRenames(items) {
+    if (!items) return;
+    for (const item of items) {
+      if (item.type === 'rename' && item.refId && item.text) {
+        blockRenames[item.refId] = item.text;
+      } else if (item.type === 'choose') {
+        if (item.paramRefId && !item.accessNone && !activeParams.has(item.paramRefId)) continue;
+        const raw = getVal(item.paramRefId);
+        const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
+        let matched = false, defItems = null;
+        for (const w of item.whens || []) {
+          if (w.isDefault) { defItems = w.items; continue; }
+          if (etsTestMatch(val, w.test)) { matched = true; collectRenames(w.items); }
+        }
+        if (!matched && defItems) collectRenames(defItems);
+      } else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') {
+        collectRenames(item.items);
+      }
     }
-    for (const b of node.blocks || []) walkNode(b, secLabel, args, mkPrefix);
-    for (const choice of node.choices || []) evalChoice(choice, secLabel, args, mkPrefix);
   }
 
-  function evalChoice(choice, secLabel, args, mkPrefix) {
-    const raw = getVal(choice.paramRefId);
-    const val = String(raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''));
-    let matched = false, defNode = null;
-    for (const w of choice.whens || []) {
-      if (w.isDefault) { defNode = w.node; continue; }
-      if (etsTestMatch(val, w.test)) { matched = true; walkNode(w.node, secLabel, args, mkPrefix); }
+  function walkItems(items, secLabel, args, mkPrefix, grpLabel) {
+    if (!items) return;
+    for (const item of items) {
+      if (item.type === 'paramRef') {
+        const prKey = item.refId;
+        const instanceKey = mkPrefix ? mkPrefix + prKey.replace(/^[^_]*_/, '_') : prKey;
+        addItem(secLabel || '', instanceKey, prKey, args, item.cell, grpLabel);
+      } else if (item.type === 'separator') {
+        addSeparator(secLabel || '', item, grpLabel);
+      } else if (item.type === 'rename') {
+        // Store rename for later use when resolving block labels
+        if (item.refId && item.text) blockRenames[item.refId] = item.text;
+      } else if (item.type === 'block') {
+        if (item.layout === 'Table' && item.rows && item.columns) {
+          const key = ensureSection(secLabel || '', grpLabel);
+          if (!secTableLayouts[key]) secTableLayouts[key] = { rows: item.rows, columns: item.columns };
+        }
+        // Pre-scan block's children for Renames (they can rename THIS block)
+        collectRenames(item.items);
+        if (item.inline || item.access === 'None') {
+          walkItems(item.items, secLabel, args, mkPrefix, grpLabel);
+        } else {
+          const renamed = item.id ? blockRenames[item.id] : null;
+          const blockLabel = renamed || interpTpl(item.text, args) || item.text || item.name || secLabel;
+          walkItems(item.items, blockLabel, args, mkPrefix, grpLabel);
+        }
+      } else if (item.type === 'choose') {
+        if (item.paramRefId && !item.accessNone && !activeParams.has(item.paramRefId)) continue;
+        const raw = getVal(item.paramRefId);
+        const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
+        let matched = false, defItems = null;
+        for (const w of item.whens || []) {
+          if (w.isDefault) { defItems = w.items; continue; }
+          if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items, secLabel, args, mkPrefix, grpLabel); }
+        }
+        if (!matched && defItems) walkItems(defItems, secLabel, args, mkPrefix, grpLabel);
+      } else if (item.type === 'channel') {
+        // Resolve channel label: use TextParameterRefId value if available
+        let chLabel = interpTpl(item.label, args) || item.label || '';
+        if (item.textParamRefId) {
+          const textVal = getVal(item.textParamRefId);
+          if (textVal) chLabel = String(textVal);
+        }
+        // Pre-collect renames from this channel's children
+        collectRenames(item.items);
+        walkItems(item.items, chLabel, args, mkPrefix, chLabel);
+      } else if (item.type === 'cib') {
+        walkItems(item.items, '', args, mkPrefix, grpLabel);
+      }
     }
-    if (!matched && defNode) walkNode(defNode, secLabel, args, mkPrefix);
   }
 
-  function walkDynSection(section, args, mkPrefix) {
-    if (!section) return;
-    for (const ch of section.channels || []) walkNode(ch.node, interpTpl(ch.label, args) || ch.label, args, mkPrefix);
-    for (const ci of section.cib || []) walkNode(ci, '', args, mkPrefix);
-    for (const pb of section.pb || []) walkNode(pb, '', args, mkPrefix);
-    for (const choice of section.choices || []) evalChoice(choice, '', args, mkPrefix);
-  }
-
-  walkDynSection(dynTree?.main, {}, null);
+  walkItems(dynTree?.main?.items, '', {}, null, '');
 
   for (const md of dynTree?.moduleDefs || []) {
     const defId = md.id;
@@ -253,7 +303,7 @@ export function DeviceParameters({ dev, projectId, C }) {
     for (const mk of moduleKeys) {
       const args = modArgs[mk] || {};
       const mkPrefix = mk + '_MI-1';
-      walkDynSection(md, args, mkPrefix);
+      walkItems(md.items, '', args, mkPrefix, '');
     }
   }
 
@@ -399,7 +449,7 @@ export function DeviceParameters({ dev, projectId, C }) {
                     if (grp !== lastGroup) {
                       lastGroup = grp;
                       if (grp) items.push(
-                        <div key={'grp:' + grp} style={{ padding: '5px 10px 2px', fontSize: 9, color: C.dim, userSelect: 'none', whiteSpace: 'nowrap', letterSpacing: '0.05em', textTransform: 'uppercase', borderLeft: '2px solid transparent' }}>
+                        <div key={'grp:' + grp} style={{ padding: '5px 10px 2px', fontSize: 9, color: C.dim, userSelect: 'none', whiteSpace: 'nowrap', letterSpacing: '0.05em', borderLeft: '2px solid transparent' }}>
                           {grp}
                         </div>
                       );
@@ -419,19 +469,104 @@ export function DeviceParameters({ dev, projectId, C }) {
               </div>
             )}
             <div style={{ flex: 1, overflowY: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+              <SectionContent items={secMap[curSec] || []} tableLayout={secTableLayouts[curSec]} renderInput={renderInput} C={C} />
+            </div>
+          </div>
+      }
+    </div>
+  );
+}
+
+function SepRow({ item, C }) {
+  if (item.uiHint === 'Headline' && item.text)
+    return <tr><td colSpan={99} style={{ padding: '10px 8px 4px', color: C.accent, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>{item.text}</td></tr>;
+  if (item.uiHint === 'HorizontalRuler')
+    return <tr><td colSpan={99} style={{ padding: 0 }}><hr style={{ border: 'none', borderTop: `1px solid ${C.border}`, margin: '4px 0' }} /></td></tr>;
+  if (item.uiHint === 'Information' && item.text)
+    return <tr><td colSpan={99} style={{ padding: '6px 8px' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', background: `${C.accent}08`, border: `1px solid ${C.accent}25`, borderRadius: 4, fontSize: 9, color: C.muted }}>
+        <span style={{ color: C.accent, fontSize: 11, fontWeight: 700, lineHeight: 1, flexShrink: 0 }}>i</span>
+        <span>{item.text}</span>
+      </div>
+    </td></tr>;
+  return null;
+}
+
+function SectionContent({ items, tableLayout, renderInput, C }) {
+  if (!items?.length) return null;
+
+  // Group into runs preserving order: separator, table (cells), regular params
+  const runs = [];
+  const cellMap = tableLayout ? {} : null;
+
+  for (const item of items) {
+    if (item.type === 'separator') {
+      runs.push({ type: 'separator', item });
+    } else if (item.cell && tableLayout) {
+      cellMap[item.cell] = item;
+      if (!runs.some(r => r.type === 'table')) runs.push({ type: 'table' });
+    } else {
+      const last = runs[runs.length - 1];
+      if (last?.type === 'params') last.items.push(item);
+      else runs.push({ type: 'params', items: [item] });
+    }
+  }
+
+  const { rows, columns } = tableLayout || {};
+  const bc = C.border;
+
+  return (
+    <>
+      {runs.map((run, ri) => {
+        if (run.type === 'separator') {
+          return <table key={`s${ri}`} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}><tbody><SepRow item={run.item} C={C} /></tbody></table>;
+        }
+        if (run.type === 'table' && rows && columns) {
+          return (
+            <table key={`t${ri}`} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, border: `1px solid ${bc}`, margin: '4px 0' }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '4px 8px', textAlign: 'left', color: C.dim, fontSize: 9, fontWeight: 600, border: `1px solid ${bc}` }}></th>
+                  {columns.map((col, ci) => (
+                    <th key={ci} style={{ padding: '4px 8px', textAlign: 'left', color: C.dim, fontSize: 9, fontWeight: 600, width: col.width || 'auto', border: `1px solid ${bc}` }}>{col.text}</th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
-                {(secMap[curSec] || []).map((item, i) => (
-                  <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                {rows.map((row, rowIdx) => {
+                  const rowItems = columns.map((_, ci) => cellMap[`${rowIdx + 1},${ci + 1}`]);
+                  if (rowItems.every(x => !x)) return null;
+                  return (
+                    <tr key={rowIdx}>
+                      <td style={{ padding: '4px 8px', color: C.muted, fontWeight: 500, border: `1px solid ${bc}` }}>{row.text}</td>
+                      {rowItems.map((item, ci) => (
+                        <td key={ci} style={{ padding: '3px 8px', verticalAlign: 'middle', border: `1px solid ${bc}` }}>
+                          {item ? renderInput(item) : null}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          );
+        }
+        if (run.type === 'params') {
+          return (
+            <table key={`p${ri}`} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+              <tbody>
+                {run.items.map((item, i) => (
+                  <tr key={i}>
                     <td style={{ padding: '4px 8px', color: C.muted, width: '50%', verticalAlign: 'middle' }}>{item.label}</td>
                     <td style={{ padding: '3px 8px', verticalAlign: 'middle' }}>{renderInput(item)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            </div>
-          </div>
-      }
-    </div>
+          );
+        }
+        return null;
+      })}
+    </>
   );
 }

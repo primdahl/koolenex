@@ -82,6 +82,18 @@ const xmlParser = new XMLParser({
   htmlEntities        : true,   // also handle &amp; &lt; etc.
 });
 
+// ─── Order-preserving parser for Dynamic sections ────────────────────────────
+const orderedXmlParser = new XMLParser({
+  preserveOrder: true,
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  processEntities: true,
+  htmlEntities: true,
+});
+const ordA = (el, name) => clean(el?.[':@']?.[`@_${name}`] ?? '');
+const ordTag = (el) => Object.keys(el || {}).find(k => k !== ':@');
+const ordChildren = (el) => { const tag = ordTag(el); return tag ? (el[tag] || []) : []; };
+
 // ─── Tiny helpers ─────────────────────────────────────────────────────────────
 const toArr  = v  => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
@@ -143,6 +155,29 @@ function buildAppIndex(buf) {
   if (!ap) return null;
 
   const appId = a(ap, 'Id');
+
+  // Parse Dynamic section with order-preserving parser
+  let orderedDynamic = null;
+  try {
+    const dynMatch = rawXml.match(/<Dynamic>[\s\S]*?<\/Dynamic>/);
+    if (dynMatch) {
+      const parsed = orderedXmlParser.parse(dynMatch[0]);
+      orderedDynamic = parsed?.[0]?.Dynamic || null;
+    }
+  } catch (_) {}
+
+  // Also parse ModuleDef Dynamic sections
+  const orderedModDynamics = {}; // ModuleDef Id → ordered Dynamic children
+  try {
+    const mdRe = /<ModuleDef[^>]*Id="([^"]*)"[^>]*>[\s\S]*?<Dynamic>([\s\S]*?)<\/Dynamic>[\s\S]*?<\/ModuleDef>/g;
+    let mdm;
+    while ((mdm = mdRe.exec(rawXml)) !== null) {
+      const mdId = mdm[1];
+      const dynXml = `<Dynamic>${mdm[2]}</Dynamic>`;
+      const parsed = orderedXmlParser.parse(dynXml);
+      orderedModDynamics[mdId] = parsed?.[0]?.Dynamic || null;
+    }
+  } catch (_) {}
 
   // 1. Translations: refId → { AttributeName → Text }
   //    Collect from all Language elements, English first so it wins over other languages.
@@ -708,79 +743,78 @@ function buildAppIndex(buf) {
       };
     }
 
-    function serNode(node) {
-      if (!node) return null;
-      const paramRefs = toArr(node.ParameterRefRef).map(rr => a(rr,'RefId')).filter(Boolean);
-      const assigns = toArr(node.Assign).map(ass => ({
-        target: a(ass,'TargetParamRefRef'), source: a(ass,'SourceParamRefRef') || null, value: a(ass,'Value') ?? null,
-      })).filter(x => x.target && (x.source || x.value !== null));
-      const blocks = [
-        ...toArr(node.ParameterBlock).map(serNode),
-        ...toArr(node.ChannelIndependentBlock).map(serNode),
-        ...toArr(node.Channel).map(serNode),   // channels inside when-blocks
-      ].filter(Boolean);
-      const choices = toArr(node.choose).map(ch => {
-        const prId = a(ch, 'ParamRefId');
-        const pr   = paramRefDefs[prId];
-        const pd   = pr ? paramDefs[pr.paramId] : null;
-        const effectiveAccess = pr?.access ?? pd?.access ?? '';
-        return {
-          paramRefId: prId,
-          accessNone: effectiveAccess === 'None',
-          defaultValue: pr?.prDefault ?? pd?.value ?? null,
-          whens: toArr(ch.when).map(w => {
-            const test = (a(w,'test') || a(w,'Value') || '').split(' ').filter(Boolean);
-            const isDefault = a(w,'default') === 'true';
-            const wn = serNode(w);
-            return isDefault ? { isDefault: true, node: wn } : { test, isDefault: false, node: wn };
-          }),
-        };
-      }).filter(c => c.paramRefId);
-      if (!paramRefs.length && !assigns.length && !blocks.length && !choices.length) return null;
-      return { paramRefs, assigns, blocks, choices };
-    }
-
-    function serDyn(dyn) {
-      if (!dyn) return null;
-      // Top-level choose blocks at the Dynamic level (e.g. ABB devices that put
-      // Channel/ParameterBlock hierarchies inside Dynamic/choose/when).
-      const choices = toArr(dyn.choose).map(ch => {
-        const prId = a(ch, 'ParamRefId');
-        const pr   = paramRefDefs[prId];
-        const pd   = pr ? paramDefs[pr.paramId] : null;
-        const effectiveAccess = pr?.access ?? pd?.access ?? '';
-        return {
-          paramRefId: prId,
-          accessNone: effectiveAccess === 'None',
-          defaultValue: pr?.prDefault ?? pd?.value ?? null,
-          whens: toArr(ch.when).map(w => {
-            const test = (a(w,'test') || a(w,'Value') || '').split(' ').filter(Boolean);
-            const isDefault = a(w,'default') === 'true';
-            const wn = serNode(w);
-            return isDefault ? { isDefault: true, node: wn } : { test, isDefault: false, node: wn };
-          }),
-        };
-      }).filter(c => c.paramRefId);
-      return {
-        channels: toArr(dyn.Channel).map(ch => ({
-          id: a(ch,'Id'),
-          label: T(a(ch,'Id'),'Text') || a(ch,'Text') || a(ch,'Name') || '',
-          node: serNode(ch),
-        })).filter(c => c.node),
-        cib: toArr(dyn.ChannelIndependentBlock).map(serNode).filter(Boolean),
-        pb:  toArr(dyn.ParameterBlock).map(serNode).filter(Boolean),
-        choices,
-      };
+    // Serialize ordered Dynamic tree into items arrays
+    function serOrderedItems(ordItems) {
+      if (!ordItems || !ordItems.length) return [];
+      const result = [];
+      for (const el of ordItems) {
+        const tag = ordTag(el);
+        if (!tag) continue;
+        if (tag === 'ParameterRefRef') {
+          const refId = ordA(el, 'RefId');
+          if (refId) result.push({ type: 'paramRef', refId, cell: ordA(el, 'Cell') || undefined });
+        } else if (tag === 'ParameterSeparator') {
+          const id = ordA(el, 'Id');
+          result.push({ type: 'separator', id, text: T(id, 'Text') || ordA(el, 'Text'), uiHint: ordA(el, 'UIHint') });
+        } else if (tag === 'ParameterBlock') {
+          const id = ordA(el, 'Id');
+          const children = ordChildren(el);
+          let rows, columns;
+          if (ordA(el, 'Layout') === 'Table') {
+            rows = []; columns = [];
+            for (const child of children) {
+              const ctag = ordTag(child);
+              if (ctag === 'Rows') for (const r of ordChildren(child)) if (ordTag(r) === 'Row') rows.push({ id: ordA(r, 'Id'), text: T(ordA(r, 'Id'), 'Text') || ordA(r, 'Text') || ordA(r, 'Name') });
+              if (ctag === 'Columns') for (const c of ordChildren(child)) if (ordTag(c) === 'Column') columns.push({ id: ordA(c, 'Id'), text: T(ordA(c, 'Id'), 'Text') || ordA(c, 'Text') || ordA(c, 'Name'), width: ordA(c, 'Width') || undefined });
+            }
+          }
+          result.push({
+            type: 'block', id, text: T(id, 'Text') || ordA(el, 'Text') || '',
+            name: ordA(el, 'Name'), inline: ordA(el, 'Inline') === 'true', access: ordA(el, 'Access') || undefined,
+            layout: ordA(el, 'Layout') || undefined, rows, columns,
+            items: serOrderedItems(children),
+          });
+        } else if (tag === 'choose') {
+          const prId = ordA(el, 'ParamRefId');
+          const pr = paramRefDefs[prId];
+          const pd = pr ? paramDefs[pr.paramId] : null;
+          const effectiveAccess = pr?.access ?? pd?.access ?? '';
+          const whens = [];
+          for (const w of ordChildren(el)) {
+            if (ordTag(w) !== 'when') continue;
+            const test = (ordA(w, 'test') || ordA(w, 'Value') || '').split(' ').filter(Boolean);
+            const isDefault = ordA(w, 'default') === 'true';
+            whens.push({ test, isDefault, items: serOrderedItems(ordChildren(w)) });
+          }
+          if (prId) result.push({ type: 'choose', paramRefId: prId, accessNone: effectiveAccess === 'None', defaultValue: pr?.prDefault ?? pd?.value ?? null, whens });
+        } else if (tag === 'Rename') {
+          result.push({ type: 'rename', refId: ordA(el, 'RefId'), text: T(ordA(el, 'Id'), 'Text') || ordA(el, 'Text') });
+        } else if (tag === 'Assign') {
+          const target = ordA(el, 'TargetParamRefRef');
+          const source = ordA(el, 'SourceParamRefRef') || null;
+          const value = ordA(el, 'Value');
+          if (target && (source || value !== '')) result.push({ type: 'assign', target, source, value: value !== '' ? value : null });
+        } else if (tag === 'ComObjectRefRef') {
+          result.push({ type: 'comRef', refId: ordA(el, 'RefId') });
+        } else if (tag === 'Channel') {
+          const chId = ordA(el, 'Id');
+          const textPrId = ordA(el, 'TextParameterRefId') || undefined;
+          result.push({ type: 'channel', id: chId, label: T(chId, 'Text') || ordA(el, 'Text') || ordA(el, 'Name') || '', textParamRefId: textPrId, items: serOrderedItems(ordChildren(el)) });
+        } else if (tag === 'ChannelIndependentBlock') {
+          result.push({ type: 'cib', items: serOrderedItems(ordChildren(el)) });
+        }
+        // Skip Rows, Columns, Row, Column (handled inside ParameterBlock)
+      }
+      return result;
     }
 
     const dynTree = {
-      main: serDyn(ap.Dynamic),
-      moduleDefs: toArr(ap.ModuleDefs?.ModuleDef).map(md => ({
-        id: a(md,'Id'),
-        channels: serDyn(md.Dynamic)?.channels || [],
-        cib: serDyn(md.Dynamic)?.cib || [],
-        pb:  serDyn(md.Dynamic)?.pb  || [],
-      })).filter(m => m.channels.length || m.cib.length || m.pb.length),
+      main: orderedDynamic ? { items: serOrderedItems(orderedDynamic) } : null,
+      moduleDefs: toArr(ap.ModuleDefs?.ModuleDef).map(md => {
+        const mdId = a(md, 'Id');
+        const ordDyn = orderedModDynamics[mdId];
+        return { id: mdId, items: ordDyn ? serOrderedItems(ordDyn) : [] };
+      }).filter(m => m.items.length > 0),
     };
 
     // paramMemLayout: ALL paramRefs (including Access=None download-only params)
