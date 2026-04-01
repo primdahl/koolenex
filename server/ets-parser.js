@@ -741,7 +741,7 @@ function buildAppIndex(buf) {
   function evalDynamic(getVal) {
     const activeParams = new Set();
     const activeCorefs = new Set();
-    const activeCorefsByObjNum = new Map(); // objectNumber → [corIds] in walk order
+    const activeCorefsByObjNum = new Map(); // objectNumber → [{corId, channel}] in walk order
 
     function etsTestMatch(val, tests) {
       const n = parseFloat(val);
@@ -771,23 +771,29 @@ function buildAppIndex(buf) {
       return ti?.kind === 'none';
     }
 
-    function walkItems(items) {
+    function walkItems(items, channelLabel) {
       if (!items) return;
       for (const item of items) {
         if (item.type === 'paramRef') { if (item.refId) activeParams.add(item.refId); }
         else if (item.type === 'comRef') {
           if (item.refId) {
             activeCorefs.add(item.refId);
-            // Track per object number — prefer variants with specific Text/FunctionText overrides
             const cor = corDefs[item.refId];
             const co = cor ? coDefs[cor.refId] : null;
             if (co) {
               if (!activeCorefsByObjNum.has(co.num)) activeCorefsByObjNum.set(co.num, []);
-              activeCorefsByObjNum.get(co.num).push(item.refId);
+              // Interpolate channel label templates (e.g. {{0: Shutter Actuator A+B}})
+              let ch = channelLabel || '';
+              if (ch && ch.includes('{{')) {
+                const mdMatch = item.refId.match(/_(MD-\w+)_(M-\d+)_/);
+                ch = interp(ch, mdMatch ? (modArgs[`${appId}_${mdMatch[1]}_${mdMatch[2]}`] || {}) : {});
+              }
+              activeCorefsByObjNum.get(co.num).push({ corId: item.refId, channel: ch });
             }
           }
         }
-        else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') { walkItems(item.items); }
+        else if (item.type === 'channel') { walkItems(item.items, item.label || channelLabel); }
+        else if (item.type === 'block' || item.type === 'cib') { walkItems(item.items, channelLabel); }
         else if (item.type === 'choose') {
           // Skip if controlling param is known visible but not active (prevents phantom COs)
           if (item.paramRefId && !item.accessNone && !isTypeNone(item.paramRefId) && !activeParams.has(item.paramRefId)) continue;
@@ -796,9 +802,9 @@ function buildAppIndex(buf) {
           let matched = false, defItems = null;
           for (const w of item.whens || []) {
             if (w.isDefault) { defItems = w.items; continue; }
-            if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items); }
+            if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items, channelLabel); }
           }
-          if (!matched && defItems) walkItems(defItems);
+          if (!matched && defItems) walkItems(defItems, channelLabel);
         }
       }
     }
@@ -1513,15 +1519,16 @@ function parseKnxproj(buffer, password = null) {
               }
               // Also merge overrides from the active Dynamic tree variants
               if (activeCorefsByObjNum && objNum != null) {
-                const corIds = activeCorefsByObjNum.get(objNum);
-                if (corIds) {
-                  for (const corId of corIds) {
+                const entries = activeCorefsByObjNum.get(objNum);
+                if (entries) {
+                  for (const { corId, channel: ch } of entries) {
                     const r = appIdx.resolveCoRefById(corId);
                     if (!r) continue;
                     if (r.name) name = r.name;
                     if (r.function_text) function_text = r.function_text;
                     if (r.dpt) dpt = r.dpt;
                     if (r.objectSize) objectSize = r.objectSize;
+                    if (ch) channel = ch;
                   }
                 }
               }
@@ -1602,14 +1609,16 @@ function parseKnxproj(buffer, password = null) {
             );
 
             // For each object number, resolve all active ComObjectRef variants and merge
-            for (const [objNum, corIds] of activeCorefsByObjNum) {
+            for (const [objNum, entries] of activeCorefsByObjNum) {
               try {
               if (linkedObjNums.has(objNum)) continue;
               // Resolve each variant and merge: later overrides win per-attribute
               let merged = null;
-              for (const corId of corIds) {
+              let channel = '';
+              for (const { corId, channel: ch } of entries) {
                 const r = appIdx.resolveCoRefById(corId);
                 if (!r) continue;
+                if (ch) channel = ch;
                 if (!merged) {
                   merged = { ...r };
                 } else {
@@ -1624,7 +1633,7 @@ function parseKnxproj(buffer, password = null) {
               comObjects.push({
                 device_address: ia,
                 object_number:  merged.objectNumber,
-                channel:        merged.channel,
+                channel:        channel || merged.channel,
                 name:           merged.name,
                 function_text:  merged.function_text,
                 dpt:            merged.dpt,

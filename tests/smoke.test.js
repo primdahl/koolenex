@@ -163,34 +163,46 @@ describe('Smoke: communication objects', () => {
     assert(byNum[4], 'CO #4 should exist');
     assert.equal(byNum[4].name, 'Central - Load shedding');
     assert.equal(byNum[4].function_text, 'Receive load shedding stage');
+    assert.equal(byNum[4].channel, 'Device settings');
 
     assert(byNum[13], 'CO #13 should exist');
     assert.equal(byNum[13].name, 'Manual operation - Manual operation');
     assert.equal(byNum[13].function_text, 'Status Manual operation');
+    assert.equal(byNum[13].channel, 'Manual operation');
 
     assert(byNum[14], 'CO #14 should exist');
     assert.equal(byNum[14].name, 'Manual operation - Manual operation');
     assert.equal(byNum[14].function_text, 'Enable/Block manual operation');
+    assert.equal(byNum[14].channel, 'Manual operation');
 
     assert(byNum[15], 'CO #15 should exist');
     assert.equal(byNum[15].name, 'Manual operation - Manual operation');
     assert.equal(byNum[15].function_text, 'Ending manual operation');
+    assert.equal(byNum[15].channel, 'Manual operation');
 
     // Per-channel shutter COs (channels A, C, E, G — configured as Shutter Actuator)
     assert(byNum[144], 'CO #144 (Channel A shutter) should exist');
     assert.equal(byNum[144].name, 'Channel A - Shutter');
     assert.equal(byNum[144].function_text, 'Move Blind/Shutter Up/Down');
+    assert.equal(byNum[144].channel, 'Shutter Actuator A+B');
 
     assert(byNum[145], 'CO #145 (Channel A slat) should exist');
     assert.equal(byNum[145].name, 'Channel A - Shutter');
     assert.equal(byNum[145].function_text, 'Slat adjustment / Stop Up/Down');
+    assert.equal(byNum[145].channel, 'Shutter Actuator A+B');
 
     assert(byNum[187], 'CO #187 (Channel C shutter) should exist');
+    assert.equal(byNum[187].channel, 'Shutter Actuator C+D');
     assert(byNum[188], 'CO #188 (Channel C slat) should exist');
+    assert.equal(byNum[188].channel, 'Shutter Actuator C+D');
     assert(byNum[230], 'CO #230 (Channel E shutter) should exist');
+    assert.equal(byNum[230].channel, 'Shutter Actuator E+F');
     assert(byNum[231], 'CO #231 (Channel E slat) should exist');
+    assert.equal(byNum[231].channel, 'Shutter Actuator E+F');
     assert(byNum[273], 'CO #273 (Channel G shutter) should exist');
+    assert.equal(byNum[273].channel, 'Shutter Actuator G+H');
     assert(byNum[274], 'CO #274 (Channel G slat) should exist');
+    assert.equal(byNum[274].channel, 'Shutter Actuator G+H');
 
     // Verify NO threshold COs are present (logic gate function defaults to None)
     for (const co of cos) {
@@ -208,32 +220,33 @@ describe('Smoke: communication objects', () => {
     const byNum = Object.fromEntries(cos.map(co => [co.object_number, co]));
 
     const expected = [
-      { num:  2, name: 'Central: Switching',                      ft: 'Input' },
-      { num:  3, name: 'Central: Dimming',                        ft: 'Input' },
-      { num:  4, name: 'Central: Value',                          ft: 'Input' },
-      { num:  5, name: 'Central: Activate switch-off brightness', ft: 'Input' },
-      { num:  6, name: 'Scene: Scene',                            ft: 'Input' },
-      { num:  7, name: 'Channel A: Switching',                    ft: 'Input' },
-      { num:  8, name: 'Channel A: Relative dimming',             ft: 'Input' },
-      { num:  9, name: 'Channel A: Brightness value',             ft: 'Input' },
-      { num: 12, name: 'Channel A: Flexible dimming time',        ft: 'Input' },
-      { num: 18, name: 'Channel B: Switching',                    ft: 'Input' },
-      { num: 19, name: 'Channel B: Relative dimming',             ft: 'Input' },
-      { num: 20, name: 'Channel B: Brightness value',             ft: 'Input' },
-      { num: 23, name: 'Channel B: Flexible dimming time',        ft: 'Input' },
-      { num: 29, name: 'Channel C: Switching',                    ft: 'Input' },
-      { num: 30, name: 'Channel C: Relative dimming',             ft: 'Input' },
-      { num: 31, name: 'Channel C: Brightness value',             ft: 'Input' },
-      { num: 34, name: 'Channel C: Flexible dimming time',        ft: 'Input' },
-      { num: 40, name: 'Channel D: Switching',                    ft: 'Input' },
-      { num: 41, name: 'Channel D: Relative dimming',             ft: 'Input' },
-      { num: 42, name: 'Channel D: Brightness value',             ft: 'Input' },
-      { num: 45, name: 'Channel D: Flexible dimming time',        ft: 'Input' },
+      { num:  2, name: 'Central: Switching',                      ft: 'Input', ch: 'Device settings' },
+      { num:  3, name: 'Central: Dimming',                        ft: 'Input', ch: 'Device settings' },
+      { num:  4, name: 'Central: Value',                          ft: 'Input', ch: 'Device settings' },
+      { num:  5, name: 'Central: Activate switch-off brightness', ft: 'Input', ch: 'Device settings' },
+      { num:  6, name: 'Scene: Scene',                            ft: 'Input', ch: 'Scenes' },
+      { num:  7, name: 'Channel A: Switching',                    ft: 'Input', ch: 'Channel A' },
+      { num:  8, name: 'Channel A: Relative dimming',             ft: 'Input', ch: 'Channel A' },
+      { num:  9, name: 'Channel A: Brightness value',             ft: 'Input', ch: 'Channel A' },
+      { num: 12, name: 'Channel A: Flexible dimming time',        ft: 'Input', ch: 'Channel A' },
+      { num: 18, name: 'Channel B: Switching',                    ft: 'Input', ch: 'Channel B' },
+      { num: 19, name: 'Channel B: Relative dimming',             ft: 'Input', ch: 'Channel B' },
+      { num: 20, name: 'Channel B: Brightness value',             ft: 'Input', ch: 'Channel B' },
+      { num: 23, name: 'Channel B: Flexible dimming time',        ft: 'Input', ch: 'Channel B' },
+      { num: 29, name: 'Channel C: Switching',                    ft: 'Input', ch: 'Channel C' },
+      { num: 30, name: 'Channel C: Relative dimming',             ft: 'Input', ch: 'Channel C' },
+      { num: 31, name: 'Channel C: Brightness value',             ft: 'Input', ch: 'Channel C' },
+      { num: 34, name: 'Channel C: Flexible dimming time',        ft: 'Input', ch: 'Channel C' },
+      { num: 40, name: 'Channel D: Switching',                    ft: 'Input', ch: 'Channel D' },
+      { num: 41, name: 'Channel D: Relative dimming',             ft: 'Input', ch: 'Channel D' },
+      { num: 42, name: 'Channel D: Brightness value',             ft: 'Input', ch: 'Channel D' },
+      { num: 45, name: 'Channel D: Flexible dimming time',        ft: 'Input', ch: 'Channel D' },
     ];
     for (const e of expected) {
       assert(byNum[e.num], `CO #${e.num} should exist`);
       assert.equal(byNum[e.num].name, e.name, `CO #${e.num} name`);
       assert.equal(byNum[e.num].function_text, e.ft, `CO #${e.num} function_text`);
+      assert.equal(byNum[e.num].channel, e.ch, `CO #${e.num} channel`);
     }
   });
 
@@ -253,14 +266,17 @@ describe('Smoke: communication objects', () => {
     assert(byNum[1], 'CO #1 should exist');
     assert.equal(byNum[1].name, 'S1.1: Travel');
     assert.equal(byNum[1].function_text, 'Input/Output');
+    assert.equal(byNum[1].channel, 'Button pair 1-2 | button 1');
 
     assert(byNum[2], 'CO #2 should exist');
     assert.equal(byNum[2].name, 'S1.1: Adjust');
     assert.equal(byNum[2].function_text, 'Input/Output');
+    assert.equal(byNum[2].channel, 'Button pair 1-2 | button 1');
 
     assert(byNum[16], 'CO #16 should exist');
     assert.equal(byNum[16].name, 'S2.1: Switching');
     assert.equal(byNum[16].function_text, 'Input/Output');
+    assert.equal(byNum[16].channel, 'Button pair 3-4 | button 3');
 
     const nums = cos.map(co => co.object_number).sort((a, b) => a - b);
     assert.deepEqual(nums, [1, 2, 16]);
@@ -274,10 +290,12 @@ describe('Smoke: communication objects', () => {
     assert(byNum[0], 'CO #0 should exist');
     assert.equal(byNum[0].name, 'Input A');
     assert.equal(byNum[0].function_text, 'Disable');
+    assert.equal(byNum[0].channel, 'Generic');
 
     assert(byNum[1], 'CO #1 should exist');
     assert.equal(byNum[1].name, 'Input A');
     assert.equal(byNum[1].function_text, 'Telegr. switch');
+    assert.equal(byNum[1].channel, 'Generic');
 
     const nums = cos.map(co => co.object_number).sort((a, b) => a - b);
     assert.deepEqual(nums, [0, 1]);
