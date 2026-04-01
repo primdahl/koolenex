@@ -299,7 +299,7 @@ function ComObjectGAAdder({ co, gaMap, C, onAdd }) {
     return (
       <span onClick={() => setOpen(true)}
         style={{ color: C.green, fontSize: 8, cursor: 'pointer', opacity: 0.7 }}
-        title="Add group address">+ add GA</span>
+        title="Link group address">+ link GA</span>
     );
   }
 
