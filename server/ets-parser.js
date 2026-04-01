@@ -637,51 +637,148 @@ function buildAppIndex(buf) {
 
   const getModArgs = (mk) => modArgs[mk] || null;
 
+  // ── Serialize ordered Dynamic tree into items arrays ──────────────────────
+  function serOrderedItems(ordItems) {
+    if (!ordItems || !ordItems.length) return [];
+    const result = [];
+    for (const el of ordItems) {
+      const tag = ordTag(el);
+      if (!tag) continue;
+      if (tag === 'ParameterRefRef') {
+        const refId = ordA(el, 'RefId');
+        if (refId) result.push({ type: 'paramRef', refId, cell: ordA(el, 'Cell') || undefined });
+      } else if (tag === 'ParameterSeparator') {
+        const id = ordA(el, 'Id');
+        result.push({ type: 'separator', id, text: T(id, 'Text') || ordA(el, 'Text'), uiHint: ordA(el, 'UIHint') });
+      } else if (tag === 'ParameterBlock') {
+        const id = ordA(el, 'Id');
+        const children = ordChildren(el);
+        let rows, columns;
+        if (ordA(el, 'Layout') === 'Table') {
+          rows = []; columns = [];
+          for (const child of children) {
+            const ctag = ordTag(child);
+            if (ctag === 'Rows') for (const r of ordChildren(child)) if (ordTag(r) === 'Row') rows.push({ id: ordA(r, 'Id'), text: T(ordA(r, 'Id'), 'Text') || ordA(r, 'Text') || ordA(r, 'Name') });
+            if (ctag === 'Columns') for (const c of ordChildren(child)) if (ordTag(c) === 'Column') columns.push({ id: ordA(c, 'Id'), text: T(ordA(c, 'Id'), 'Text') || ordA(c, 'Text') || ordA(c, 'Name'), width: ordA(c, 'Width') || undefined });
+          }
+        }
+        let blockText = T(id, 'Text') || ordA(el, 'Text') || '';
+        if (!blockText) {
+          const prId = ordA(el, 'ParamRefId');
+          if (prId) {
+            const pr = paramRefDefs[prId];
+            const pd = pr ? paramDefs[pr.paramId] : null;
+            blockText = T(pr?.paramId, 'Text') || pr?.text || pd?.text || '';
+          }
+        }
+        result.push({
+          type: 'block', id, text: blockText,
+          name: ordA(el, 'Name'), inline: ordA(el, 'Inline') === 'true', access: ordA(el, 'Access') || undefined,
+          layout: ordA(el, 'Layout') || undefined, rows, columns,
+          items: serOrderedItems(children),
+        });
+      } else if (tag === 'choose') {
+        const prId = ordA(el, 'ParamRefId');
+        const pr = paramRefDefs[prId];
+        const pd = pr ? paramDefs[pr.paramId] : null;
+        const effectiveAccess = pr?.access ?? pd?.access ?? '';
+        const whens = [];
+        for (const w of ordChildren(el)) {
+          if (ordTag(w) !== 'when') continue;
+          const test = (ordA(w, 'test') || ordA(w, 'Value') || '').split(' ').filter(Boolean);
+          const isDefault = ordA(w, 'default') === 'true';
+          whens.push({ test, isDefault, items: serOrderedItems(ordChildren(w)) });
+        }
+        if (prId) result.push({ type: 'choose', paramRefId: prId, accessNone: effectiveAccess === 'None', defaultValue: pr?.prDefault ?? pd?.value ?? null, whens });
+      } else if (tag === 'Rename') {
+        result.push({ type: 'rename', refId: ordA(el, 'RefId'), text: T(ordA(el, 'Id'), 'Text') || ordA(el, 'Text') });
+      } else if (tag === 'Assign') {
+        const target = ordA(el, 'TargetParamRefRef');
+        const source = ordA(el, 'SourceParamRefRef') || null;
+        const value = ordA(el, 'Value');
+        if (target && (source || value !== '')) result.push({ type: 'assign', target, source, value: value !== '' ? value : null });
+      } else if (tag === 'ComObjectRefRef') {
+        result.push({ type: 'comRef', refId: ordA(el, 'RefId') });
+      } else if (tag === 'Channel') {
+        const chId = ordA(el, 'Id');
+        const textPrId = ordA(el, 'TextParameterRefId') || undefined;
+        result.push({ type: 'channel', id: chId, label: T(chId, 'Text') || ordA(el, 'Text') || ordA(el, 'Name') || '', textParamRefId: textPrId, items: serOrderedItems(ordChildren(el)) });
+      } else if (tag === 'ChannelIndependentBlock') {
+        result.push({ type: 'cib', items: serOrderedItems(ordChildren(el)) });
+      }
+    }
+    return result;
+  }
+
   // ── Dynamic condition evaluator ───────────────────────────────────────────
   // Walks the Dynamic choose/when tree using per-device param values.
   // Returns { activeParams: Set<prKey>, activeCorefs: Set<corId> }.
+  // Uses the ordered Dynamic tree to correctly evaluate choose/when conditions
+  // including operator tests (!=, <, >, etc.) and TypeNone page-marker params.
   function evalDynamic(getVal) {
     const activeParams = new Set();
     const activeCorefs = new Set();
 
-    function walkNode(node) {
-      for (const rr of toArr(node.ParameterRefRef)) {
-        const rid = a(rr, 'RefId');
-        if (rid) activeParams.add(rid);
+    function etsTestMatch(val, tests) {
+      const n = parseFloat(val);
+      for (const t of tests) {
+        const rm = typeof t === 'string' && t.match(/^(!=|=|[<>]=?)(-?\d+(?:\.\d+)?)$/);
+        if (rm) {
+          if (isNaN(n)) continue;
+          const rv = parseFloat(rm[2]);
+          const op = rm[1];
+          if (op === '<'  && n <  rv) return true;
+          if (op === '>'  && n >  rv) return true;
+          if (op === '<=' && n <= rv) return true;
+          if (op === '>=' && n >= rv) return true;
+          if (op === '='  && n === rv) return true;
+          if (op === '!=' && n !== rv) return true;
+        } else if (String(t) === val) return true;
       }
-      for (const cr of toArr(node.ComObjectRefRef)) {
-        const rid = a(cr, 'RefId');
-        if (rid) activeCorefs.add(rid);
-      }
-      for (const pb  of toArr(node.ParameterBlock))           walkNode(pb);
-      for (const cib of toArr(node.ChannelIndependentBlock)) walkNode(cib);
-      for (const ch  of toArr(node.choose))                   evalChoose(ch);
+      return false;
     }
 
-    function evalChoose(ch) {
-      const prId = a(ch, 'ParamRefId');
-      const val  = String(getVal(prId) ?? '');
-      let matched = false, defWhen = null;
-      for (const w of toArr(ch.when)) {
-        if (a(w, 'default') === 'true') { defWhen = w; continue; }
-        // ETS6 uses 'test' attribute; older ETS uses 'Value' — support both
-        const testAttr = a(w, 'test') || a(w, 'Value');
-        const vals = testAttr.split(' ').filter(Boolean);
-        if (vals.includes(val)) { matched = true; walkNode(w); }
+    function isTypeNone(prId) {
+      const pr = paramRefDefs[prId];
+      if (!pr) return true; // unknown param — treat as always-evaluate
+      const pd = paramDefs[pr.paramId];
+      if (!pd) return true;
+      const ti = paramTypes[pd.typeRef];
+      return ti?.kind === 'none';
+    }
+
+    function walkItems(items, skipInactive) {
+      if (!items) return;
+      for (const item of items) {
+        if (item.type === 'paramRef') { if (item.refId) activeParams.add(item.refId); }
+        else if (item.type === 'comRef') { if (item.refId) activeCorefs.add(item.refId); }
+        else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') { walkItems(item.items, skipInactive); }
+        else if (item.type === 'choose') {
+          // Skip if controlling param is a real visible param that isn't active
+          if (skipInactive && item.paramRefId && !item.accessNone && !isTypeNone(item.paramRefId) && !activeParams.has(item.paramRefId)) continue;
+          const raw = getVal(item.paramRefId);
+          const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
+          let matched = false, defItems = null;
+          for (const w of item.whens || []) {
+            if (w.isDefault) { defItems = w.items; continue; }
+            if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items, skipInactive); }
+          }
+          if (!matched && defItems) walkItems(defItems, skipInactive);
+        }
       }
-      if (!matched && defWhen) walkNode(defWhen);
     }
 
-    function walkDyn(dyn) {
-      if (!dyn) return;
-      for (const ch  of toArr(dyn.Channel))                   walkNode(ch);
-      for (const cib of toArr(dyn.ChannelIndependentBlock))   walkNode(cib);
-      for (const pb  of toArr(dyn.ParameterBlock))            walkNode(pb);
-      for (const ch  of toArr(dyn.choose))                    evalChoose(ch);
-    }
+    // Pass 1: permissive — collect all reachable params and COs without active checks
+    const mainItems = orderedDynamic ? serOrderedItems(orderedDynamic) : null;
+    const modItemsList = Object.entries(orderedModDynamics).map(([id, od]) => od ? serOrderedItems(od) : null).filter(Boolean);
+    if (mainItems) walkItems(mainItems, false);
+    for (const mi of modItemsList) walkItems(mi, false);
 
-    walkDyn(ap.Dynamic);
-    for (const md of toArr(ap.ModuleDefs?.ModuleDef)) walkDyn(md.Dynamic);
+    // Pass 2: restrictive — re-walk with active checks to prune COs behind inactive params
+    const pass1Corefs = new Set(activeCorefs);
+    activeCorefs.clear();
+    if (mainItems) walkItems(mainItems, true);
+    for (const mi of modItemsList) walkItems(mi, true);
 
     return { activeParams, activeCorefs };
   }
@@ -741,81 +838,6 @@ function buildAppIndex(buf) {
         bitOffset: pd.bitOffset ?? 0,
         bitSize:   ti.sizeInBit ?? 8,
       };
-    }
-
-    // Serialize ordered Dynamic tree into items arrays
-    function serOrderedItems(ordItems) {
-      if (!ordItems || !ordItems.length) return [];
-      const result = [];
-      for (const el of ordItems) {
-        const tag = ordTag(el);
-        if (!tag) continue;
-        if (tag === 'ParameterRefRef') {
-          const refId = ordA(el, 'RefId');
-          if (refId) result.push({ type: 'paramRef', refId, cell: ordA(el, 'Cell') || undefined });
-        } else if (tag === 'ParameterSeparator') {
-          const id = ordA(el, 'Id');
-          result.push({ type: 'separator', id, text: T(id, 'Text') || ordA(el, 'Text'), uiHint: ordA(el, 'UIHint') });
-        } else if (tag === 'ParameterBlock') {
-          const id = ordA(el, 'Id');
-          const children = ordChildren(el);
-          let rows, columns;
-          if (ordA(el, 'Layout') === 'Table') {
-            rows = []; columns = [];
-            for (const child of children) {
-              const ctag = ordTag(child);
-              if (ctag === 'Rows') for (const r of ordChildren(child)) if (ordTag(r) === 'Row') rows.push({ id: ordA(r, 'Id'), text: T(ordA(r, 'Id'), 'Text') || ordA(r, 'Text') || ordA(r, 'Name') });
-              if (ctag === 'Columns') for (const c of ordChildren(child)) if (ordTag(c) === 'Column') columns.push({ id: ordA(c, 'Id'), text: T(ordA(c, 'Id'), 'Text') || ordA(c, 'Text') || ordA(c, 'Name'), width: ordA(c, 'Width') || undefined });
-            }
-          }
-          // Resolve block label: Translation > Text attr > ParamRefId param text > Name
-          let blockText = T(id, 'Text') || ordA(el, 'Text') || '';
-          if (!blockText) {
-            const prId = ordA(el, 'ParamRefId');
-            if (prId) {
-              const pr = paramRefDefs[prId];
-              const pd = pr ? paramDefs[pr.paramId] : null;
-              blockText = T(pr?.paramId, 'Text') || pr?.text || pd?.text || '';
-            }
-          }
-          result.push({
-            type: 'block', id, text: blockText,
-            name: ordA(el, 'Name'), inline: ordA(el, 'Inline') === 'true', access: ordA(el, 'Access') || undefined,
-            layout: ordA(el, 'Layout') || undefined, rows, columns,
-            items: serOrderedItems(children),
-          });
-        } else if (tag === 'choose') {
-          const prId = ordA(el, 'ParamRefId');
-          const pr = paramRefDefs[prId];
-          const pd = pr ? paramDefs[pr.paramId] : null;
-          const effectiveAccess = pr?.access ?? pd?.access ?? '';
-          const whens = [];
-          for (const w of ordChildren(el)) {
-            if (ordTag(w) !== 'when') continue;
-            const test = (ordA(w, 'test') || ordA(w, 'Value') || '').split(' ').filter(Boolean);
-            const isDefault = ordA(w, 'default') === 'true';
-            whens.push({ test, isDefault, items: serOrderedItems(ordChildren(w)) });
-          }
-          if (prId) result.push({ type: 'choose', paramRefId: prId, accessNone: effectiveAccess === 'None', defaultValue: pr?.prDefault ?? pd?.value ?? null, whens });
-        } else if (tag === 'Rename') {
-          result.push({ type: 'rename', refId: ordA(el, 'RefId'), text: T(ordA(el, 'Id'), 'Text') || ordA(el, 'Text') });
-        } else if (tag === 'Assign') {
-          const target = ordA(el, 'TargetParamRefRef');
-          const source = ordA(el, 'SourceParamRefRef') || null;
-          const value = ordA(el, 'Value');
-          if (target && (source || value !== '')) result.push({ type: 'assign', target, source, value: value !== '' ? value : null });
-        } else if (tag === 'ComObjectRefRef') {
-          result.push({ type: 'comRef', refId: ordA(el, 'RefId') });
-        } else if (tag === 'Channel') {
-          const chId = ordA(el, 'Id');
-          const textPrId = ordA(el, 'TextParameterRefId') || undefined;
-          result.push({ type: 'channel', id: chId, label: T(chId, 'Text') || ordA(el, 'Text') || ordA(el, 'Name') || '', textParamRefId: textPrId, items: serOrderedItems(ordChildren(el)) });
-        } else if (tag === 'ChannelIndependentBlock') {
-          result.push({ type: 'cib', items: serOrderedItems(ordChildren(el)) });
-        }
-        // Skip Rows, Columns, Row, Column (handled inside ParameterBlock)
-      }
-      return result;
     }
 
     const dynTree = {

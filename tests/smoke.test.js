@@ -83,7 +83,7 @@ describe('Smoke: devices', () => {
   const EXPECTED_DEVICES = [
     { ia: '1.1.0', name: 'SV/S30.160.1.1 Power Supply,160mA,MDRC', order: '2CDG 110 144 R0011', hasApp: false, paramCount: 0 },
     { ia: '1.1.1', name: 'USB/S1.2 USB Interface, MDRC', order: '2CDG 110 243 R0011', hasApp: false, paramCount: 0 },
-    { ia: '1.1.2', name: 'SAH/S8.6.7.1 Switch/Shutter Act, 8-f, 6A, MDRC', order: '2CDG 110 244 R0011', hasApp: true, paramCount: 139 },
+    { ia: '1.1.2', name: 'SAH/S8.6.7.1 Switch/Shutter Act, 8-f, 6A, MDRC', order: '2CDG 110 244 R0011', hasApp: true, paramCount: 207 },
     { ia: '1.1.3', name: 'UD/S4.210.2.1 LED Dimmer 4x210W', order: '2CKA006197A0047', hasApp: true, paramCount: 78 },
     { ia: '1.1.4', name: 'US/U2.2 Universal Interface,2-fold,FM', order: 'GH Q631 0074 R0111', hasApp: true, paramCount: 13 },
     { ia: '1.1.5', name: '6108/07-500 Push-button coupling unit 4gang, FM', order: '6108/07-500', hasApp: true, paramCount: 19 },
@@ -150,13 +150,50 @@ describe('Smoke: group addresses', () => {
 // ── Parser: Communication Objects ───────────────────────────────────────────
 
 describe('Smoke: communication objects', () => {
-  it('extracts exactly 15 com objects', () => {
-    assert.equal(parsed.comObjects.length, 15);
+  it('extracts exactly 23 com objects', () => {
+    assert.equal(parsed.comObjects.length, 23);
   });
 
-  it('SAH/S8.6.7.1 (1.1.2) has 4 com objects', () => {
+  it('SAH/S8.6.7.1 (1.1.2) has exactly these 12 com objects', () => {
     const cos = parsed.comObjects.filter(co => co.device_address === '1.1.2');
-    assert.equal(cos.length, 4);
+    assert.equal(cos.length, 12);
+    const byNum = Object.fromEntries(cos.map(co => [co.object_number, co]));
+
+    // General COs (from Device settings and Manual operation channels)
+    assert(byNum[4], 'CO #4 should exist');
+    assert.equal(byNum[4].name, 'Receive load shedding stage');
+
+    assert(byNum[13], 'CO #13 should exist');
+    assert.equal(byNum[13].name, 'Status Manual operation');
+
+    assert(byNum[14], 'CO #14 should exist');
+    assert.equal(byNum[14].name, 'Enable/Block manual operation');
+
+    assert(byNum[15], 'CO #15 should exist');
+    assert.equal(byNum[15].name, 'Ending manual operation');
+
+    // Per-channel shutter COs (channels A, C, E, G — configured as Shutter Actuator)
+    assert(byNum[144], 'CO #144 (Channel A shutter) should exist');
+    assert(byNum[144].name.includes('Channel A'));
+
+    assert(byNum[145], 'CO #145 (Channel A slat) should exist');
+    assert(byNum[145].name.includes('Slat') || byNum[145].name.includes('Stop'));
+
+    assert(byNum[187], 'CO #187 (Channel C shutter) should exist');
+    assert(byNum[188], 'CO #188 (Channel C slat) should exist');
+    assert(byNum[230], 'CO #230 (Channel E shutter) should exist');
+    assert(byNum[231], 'CO #231 (Channel E slat) should exist');
+    assert(byNum[273], 'CO #273 (Channel G shutter) should exist');
+    assert(byNum[274], 'CO #274 (Channel G slat) should exist');
+
+    // Verify NO threshold COs are present (logic gate function defaults to None)
+    for (const co of cos) {
+      assert(!co.name?.includes('Threshold'), `CO #${co.object_number} "${co.name}" should not be a threshold CO`);
+    }
+
+    // Verify exact set of object numbers
+    const nums = cos.map(co => co.object_number).sort((a, b) => a - b);
+    assert.deepEqual(nums, [4, 13, 14, 15, 144, 145, 187, 188, 230, 231, 273, 274]);
   });
 
   it('UD/S4.210.2.1 (1.1.3) has 6 com objects', () => {
@@ -344,7 +381,7 @@ describe('Smoke: API import', () => {
     assert(data.projectId);
     assert.equal(data.summary.devices, 6);
     assert.equal(data.summary.groupAddresses, 4);
-    assert.equal(data.summary.comObjects, 15);
+    assert.equal(data.summary.comObjects, 23);
     pid = data.projectId;
   });
 
@@ -354,7 +391,7 @@ describe('Smoke: API import', () => {
     assert.equal(data.project.name, 'Smoke Test');
     assert.equal(data.devices.length, 6);
     assert.equal(data.gas.length, 4);
-    assert.equal(data.comObjects.length, 15);
+    assert.equal(data.comObjects.length, 23);
     assert.equal(data.spaces.length, 4);
     assert(data.topology.length >= 5);
   });
@@ -405,7 +442,7 @@ describe('Smoke: API import', () => {
     assert.equal(status, 200, `reimport failed: ${JSON.stringify(data)}`);
     assert.equal(data.summary.devices, 6);
     assert.equal(data.summary.groupAddresses, 4);
-    assert.equal(data.summary.comObjects, 15);
+    assert.equal(data.summary.comObjects, 23);
   });
 
   it('cleanup — delete project', async () => {
