@@ -631,6 +631,8 @@ function buildAppIndex(buf) {
   const getDefault = (prKey) => {
     const pr = paramRefDefs[prKey];
     if (!pr) return null;
+    // ParameterRef Value overrides Parameter Value
+    if (pr.prDefault != null && pr.prDefault !== '') return pr.prDefault;
     const pd = paramDefs[pr.paramId];
     return pd ? pd.value : null;
   };
@@ -747,39 +749,54 @@ function buildAppIndex(buf) {
       return ti?.kind === 'none';
     }
 
-    function walkItems(items, skipInactive) {
+    function walkItems(items) {
       if (!items) return;
       for (const item of items) {
         if (item.type === 'paramRef') { if (item.refId) activeParams.add(item.refId); }
         else if (item.type === 'comRef') { if (item.refId) activeCorefs.add(item.refId); }
-        else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') { walkItems(item.items, skipInactive); }
+        else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') { walkItems(item.items); }
         else if (item.type === 'choose') {
-          // Skip if controlling param is a real visible param that isn't active
-          if (skipInactive && item.paramRefId && !item.accessNone && !isTypeNone(item.paramRefId) && !activeParams.has(item.paramRefId)) continue;
+          // Skip if controlling param is known visible but not active (prevents phantom COs)
+          if (item.paramRefId && !item.accessNone && !isTypeNone(item.paramRefId) && !activeParams.has(item.paramRefId)) continue;
           const raw = getVal(item.paramRefId);
           const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
           let matched = false, defItems = null;
           for (const w of item.whens || []) {
             if (w.isDefault) { defItems = w.items; continue; }
-            if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items, skipInactive); }
+            if (etsTestMatch(val, w.test)) { matched = true; walkItems(w.items); }
           }
-          if (!matched && defItems) walkItems(defItems, skipInactive);
+          if (!matched && defItems) walkItems(defItems);
         }
       }
     }
 
-    // Pass 1: permissive — collect all reachable params and COs without active checks
     const mainItems = orderedDynamic ? serOrderedItems(orderedDynamic) : null;
     const modItemsList = Object.entries(orderedModDynamics).map(([id, od]) => od ? serOrderedItems(od) : null).filter(Boolean);
-    if (mainItems) walkItems(mainItems, false);
-    for (const mi of modItemsList) walkItems(mi, false);
+    // Pass 1: evaluate conditions to collect active params, but don't collect corefs yet
+    function walkPass1(items) {
+      if (!items) return;
+      for (const item of items) {
+        if (item.type === 'paramRef') { if (item.refId) activeParams.add(item.refId); }
+        else if (item.type === 'comRef') { /* skip — collected in pass 2 */ }
+        else if (item.type === 'block' || item.type === 'channel' || item.type === 'cib') { walkPass1(item.items); }
+        else if (item.type === 'choose') {
+          const raw = getVal(item.paramRefId);
+          const val = String(raw !== '' && raw != null ? raw : (item.defaultValue ?? ''));
+          let matched = false, defItems = null;
+          for (const w of item.whens || []) {
+            if (w.isDefault) { defItems = w.items; continue; }
+            if (etsTestMatch(val, w.test)) { matched = true; walkPass1(w.items); }
+          }
+          if (!matched && defItems) walkPass1(defItems);
+        }
+      }
+    }
+    if (mainItems) walkPass1(mainItems);
+    for (const mi of modItemsList) walkPass1(mi);
 
-    // Pass 2: restrictive — re-walk with active checks to prune COs behind inactive params
-    const pass1Corefs = new Set(activeCorefs);
-    activeCorefs.clear();
-    if (mainItems) walkItems(mainItems, true);
-    for (const mi of modItemsList) walkItems(mi, true);
-
+    // Pass 2: re-evaluate conditions, now skipping chooses on inactive params, collecting corefs
+    if (mainItems) walkItems(mainItems);
+    for (const mi of modItemsList) walkItems(mi);
     return { activeParams, activeCorefs };
   }
 
@@ -1533,6 +1550,7 @@ function parseKnxproj(buffer, password = null) {
             );
 
             for (const corId of activeCorefs) {
+              try {
               const r = appIdx.resolveCoRefById(corId);
               if (!r || !r.name) continue;
               if (linkedObjNums.has(r.objectNumber)) continue; // already covered
@@ -1547,6 +1565,7 @@ function parseKnxproj(buffer, password = null) {
                 direction:      r.tx && !r.write ? 'output' : !r.tx && r.write ? 'input' : 'both',
                 ga_address:     '',
               });
+              } catch (e) { console.error('[ETS] resolveCoRefById error:', corId, e.message); }
             }
           }
         }

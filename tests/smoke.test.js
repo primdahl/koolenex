@@ -83,10 +83,10 @@ describe('Smoke: devices', () => {
   const EXPECTED_DEVICES = [
     { ia: '1.1.0', name: 'SV/S30.160.1.1 Power Supply,160mA,MDRC', order: '2CDG 110 144 R0011', hasApp: false, paramCount: 0 },
     { ia: '1.1.1', name: 'USB/S1.2 USB Interface, MDRC', order: '2CDG 110 243 R0011', hasApp: false, paramCount: 0 },
-    { ia: '1.1.2', name: 'SAH/S8.6.7.1 Switch/Shutter Act, 8-f, 6A, MDRC', order: '2CDG 110 244 R0011', hasApp: true, paramCount: 207 },
-    { ia: '1.1.3', name: 'UD/S4.210.2.1 LED Dimmer 4x210W', order: '2CKA006197A0047', hasApp: true, paramCount: 78 },
+    { ia: '1.1.2', name: 'SAH/S8.6.7.1 Switch/Shutter Act, 8-f, 6A, MDRC', order: '2CDG 110 244 R0011', hasApp: true, paramCount: 213 },
+    { ia: '1.1.3', name: 'UD/S4.210.2.1 LED Dimmer 4x210W', order: '2CKA006197A0047', hasApp: true, paramCount: 110 },
     { ia: '1.1.4', name: 'US/U2.2 Universal Interface,2-fold,FM', order: 'GH Q631 0074 R0111', hasApp: true, paramCount: 13 },
-    { ia: '1.1.5', name: '6108/07-500 Push-button coupling unit 4gang, FM', order: '6108/07-500', hasApp: true, paramCount: 19 },
+    { ia: '1.1.5', name: '6108/07-500 Push-button coupling unit 4gang, FM', order: '6108/07-500', hasApp: true, paramCount: 30 },
   ];
 
   for (const exp of EXPECTED_DEVICES) {
@@ -150,8 +150,8 @@ describe('Smoke: group addresses', () => {
 // ── Parser: Communication Objects ───────────────────────────────────────────
 
 describe('Smoke: communication objects', () => {
-  it('extracts exactly 23 com objects', () => {
-    assert.equal(parsed.comObjects.length, 23);
+  it('extracts exactly 38 com objects', () => {
+    assert.equal(parsed.comObjects.length, 38);
   });
 
   it('SAH/S8.6.7.1 (1.1.2) has exactly these 12 com objects', () => {
@@ -196,9 +196,12 @@ describe('Smoke: communication objects', () => {
     assert.deepEqual(nums, [4, 13, 14, 15, 144, 145, 187, 188, 230, 231, 273, 274]);
   });
 
-  it('UD/S4.210.2.1 (1.1.3) has 6 com objects', () => {
+  it('UD/S4.210.2.1 (1.1.3) has exactly these 21 com objects', () => {
     const cos = parsed.comObjects.filter(co => co.device_address === '1.1.3');
-    assert.equal(cos.length, 6);
+    assert.equal(cos.length, 21);
+    const nums = cos.map(co => co.object_number).sort((a, b) => a - b);
+    // Central COs + 4 channels x 4 COs (switching, dimming, value, flexible time)
+    assert.deepEqual(nums, [2, 3, 4, 5, 6, 7, 8, 9, 12, 18, 19, 20, 23, 29, 30, 31, 34, 40, 41, 42, 45]);
   });
 
   it('LED dimmer channel A switching is linked to Chandelier On/Off and Status', () => {
@@ -396,7 +399,7 @@ describe('Smoke: API import', () => {
     assert(data.projectId);
     assert.equal(data.summary.devices, 6);
     assert.equal(data.summary.groupAddresses, 4);
-    assert.equal(data.summary.comObjects, 23);
+    assert.equal(data.summary.comObjects, 38);
     pid = data.projectId;
   });
 
@@ -406,7 +409,7 @@ describe('Smoke: API import', () => {
     assert.equal(data.project.name, 'Smoke Test');
     assert.equal(data.devices.length, 6);
     assert.equal(data.gas.length, 4);
-    assert.equal(data.comObjects.length, 23);
+    assert.equal(data.comObjects.length, 38);
     assert.equal(data.spaces.length, 4);
     assert(data.topology.length >= 5);
   });
@@ -457,7 +460,7 @@ describe('Smoke: API import', () => {
     assert.equal(status, 200, `reimport failed: ${JSON.stringify(data)}`);
     assert.equal(data.summary.devices, 6);
     assert.equal(data.summary.groupAddresses, 4);
-    assert.equal(data.summary.comObjects, 23);
+    assert.equal(data.summary.comObjects, 38);
   });
 
   it('cleanup — delete project', async () => {
