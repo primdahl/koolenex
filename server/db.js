@@ -183,6 +183,12 @@ async function init() {
   migrate('group_addresses', 'description', "TEXT DEFAULT ''");
   migrate('devices', 'floor_x', "REAL DEFAULT -1");
   migrate('devices', 'floor_y', "REAL DEFAULT -1");
+  migrate('catalog_items', 'model',           "TEXT DEFAULT ''");
+  migrate('catalog_items', 'bus_current',     "INTEGER DEFAULT 0");
+  migrate('catalog_items', 'width_mm',        "REAL DEFAULT 0");
+  migrate('catalog_items', 'is_power_supply', "INTEGER DEFAULT 0");
+  migrate('catalog_items', 'is_coupler',      "INTEGER DEFAULT 0");
+  migrate('catalog_items', 'is_rail_mounted', "INTEGER DEFAULT 0");
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_mode', '')`);
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_addr_map', '')`);
 
