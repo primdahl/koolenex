@@ -930,7 +930,7 @@ function parseKnxproj(buffer, password = null) {
 
   // ── Manufacturer names ─────────────────────────────────────────────────────
   const mfrById = {};                     // "M-00FA" → "KNX Association"
-  const masterE = byName['knx_master.xml'];
+  const masterE = byName['knx_master.xml'] || entries.find(e => e.entryName.endsWith('/knx_master.xml'));
   let knxMasterXml = null;                // raw XML string for per-project storage
   if (masterE) {
     try {
@@ -946,7 +946,7 @@ function parseKnxproj(buffer, password = null) {
   const hwByH2P  = {};      // h2pRefId     → same
 
   for (const e of entries.filter(e => /M-[^/]+\/Hardware\.xml$/i.test(e.entryName))) {
-    const mfrId   = e.entryName.split('/')[0];
+    const mfrId   = e.entryName.match(/M-[^/]+/)?.[0] || e.entryName.split('/')[0];
     const mfrName = mfrById[mfrId] || mfrId;
     try {
       const hx = xmlParser.parse(e.getData().toString('utf8'));
@@ -1020,7 +1020,7 @@ function parseKnxproj(buffer, password = null) {
   const catalogItems = [];     // { id, name, number, description, section_id, product_ref, h2p_ref, order_number, manufacturer }
 
   for (const e of entries.filter(e => /M-[^/]+\/Catalog\.xml$/i.test(e.entryName))) {
-    const mfrId   = e.entryName.split('/')[0];
+    const mfrId   = e.entryName.match(/M-[^/]+/)?.[0] || e.entryName.split('/')[0];
     const mfrName = mfrById[mfrId] || mfrId;
     try {
       const cx = xmlParser.parse(e.getData().toString('utf8'));
