@@ -1134,6 +1134,7 @@ function parseKnxproj(buffer, password = null) {
   const links          = [];
   const spaces         = [];   // flat list of { name, type, parent_idx, sort_order }
   const devSpaceMap    = {};   // individual_address → index in spaces[]
+  const topologyEntries = [];  // { area, line (null for area-level), name, medium }
 
   for (const entry of installEntries) {
     // Try project.xml for name first
@@ -1209,7 +1210,6 @@ function parseKnxproj(buffer, password = null) {
     if (!topology) continue;
 
     const devInstById = {};  // DeviceInstance @Id → individual_address
-    const topologyEntries = [];  // { area, line (null for area-level), name, medium }
 
     for (const area of toArr(topology.Area)) {
       const areaNum  = parseInt(a(area,'Address')) || 0;
