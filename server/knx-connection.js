@@ -79,9 +79,10 @@ function encodeDpt(value, dpt) {
     case '5':  return Buffer.from([Math.min(255, Math.max(0, parseInt(value)))]);
     case '9': {
       const v = parseFloat(value);
-      const sign = v < 0 ? 1 : 0;
       let mant = Math.round(v * 100), exp = 0;
       while (mant < -2048 || mant > 2047) { mant = Math.round(mant / 2); exp++; }
+      const sign = mant < 0 ? 1 : 0;
+      if (sign) mant = mant + 2048; // two's complement 11-bit
       const raw = ((sign & 1) << 15) | ((exp & 0xF) << 11) | (mant & 0x7FF);
       const b = Buffer.alloc(2); b.writeUInt16BE(raw & 0xFFFF); return b;
     }
@@ -101,7 +102,8 @@ function decodeDptBuffer(buf) {
   if (buf.length === 2) {
     const raw = (buf[0] << 8) | buf[1];
     const sign = (raw >> 15) & 1, exp = (raw >> 11) & 0xF, mant = raw & 0x7FF;
-    const v = 0.01 * mant * Math.pow(2, exp) * (sign ? -1 : 1);
+    const signedMant = sign ? mant - 2048 : mant;
+    const v = 0.01 * signedMant * Math.pow(2, exp);
     return v.toFixed(2);
   }
   return buf.toString('hex');
@@ -622,6 +624,8 @@ module.exports = {
   decodePhysical,
   encodeGroup,
   decodeGroup,
+  encodeDpt,
+  decodeDptBuffer,
   MC,
   delay,
 };

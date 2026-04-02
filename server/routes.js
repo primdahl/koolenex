@@ -1834,3 +1834,8 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
 }
 
 module.exports = router;
+
+// Export pure helpers for testing
+module.exports.writeKnxFloat16 = writeKnxFloat16;
+module.exports.writeBits = writeBits;
+module.exports.normalizeDptKey = normalizeDptKey;
