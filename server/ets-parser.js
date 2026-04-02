@@ -89,10 +89,12 @@ const orderedXmlParser = new XMLParser({
   attributeNamePrefix: '@_',
   processEntities: true,
   htmlEntities: true,
+  trimValues: false,
 });
 const ordA = (el, name) => clean(el?.[':@']?.[`@_${name}`] ?? '');
+const ordRaw = (el, name) => (el?.[':@']?.[`@_${name}`] ?? '').toString();
 const ordTag = (el) => Object.keys(el || {}).find(k => k !== ':@');
-const ordChildren = (el) => { const tag = ordTag(el); return tag ? (el[tag] || []) : []; };
+const ordChildren = (el) => { const tag = ordTag(el); const c = tag ? el[tag] : null; return Array.isArray(c) ? c : []; };
 
 // ─── Tiny helpers ─────────────────────────────────────────────────────────────
 const toArr  = v  => (v == null ? [] : Array.isArray(v) ? v : [v]);
@@ -132,20 +134,6 @@ function buildAppIndex(buf) {
   try { xml = xmlParser.parse(rawXml); }
   catch (e) { console.error('[ETS] app parse:', e.message); return null; }
 
-  // Pre-compute ParameterBlock indent levels from the raw XML string.
-  // fast-xml-parser trims attribute values, stripping the leading spaces that ETS uses
-  // to encode visual hierarchy (e.g. Text="    E4/5 External...").
-  // We scan the raw text once to record Id → indent count before trimming.
-  const pbIndentMap = {};
-  const PB_INDENT_RE = /<ParameterBlock\b[^>]*?>/g;
-  let pbm;
-  while ((pbm = PB_INDENT_RE.exec(rawXml)) !== null) {
-    const tag = pbm[0];
-    const idM   = tag.match(/\bId="([^"]*)"/);
-    const textM = tag.match(/\bText="(\s*)/);
-    if (idM && textM) pbIndentMap[idM[1]] = textM[1].length;
-  }
-
   const mfrNode = toArr(xml?.KNX?.ManufacturerData?.Manufacturer)[0];
   if (!mfrNode) return null;
 
@@ -157,10 +145,34 @@ function buildAppIndex(buf) {
   const appId = a(ap, 'Id');
 
   // Parse entire app XML with order-preserving parser to extract Dynamic sections
+  // and ParameterBlock indent levels (leading spaces in Text attributes that the
+  // main parser trims).
   let orderedDynamic = null;
   const orderedModDynamics = {};
+  const pbIndentMap = {};
   try {
     const orderedXml = orderedXmlParser.parse(rawXml);
+
+    // Walk ordered tree to collect ParameterBlock Text indent levels.
+    // ETS uses leading spaces in ParameterBlock Text to encode visual hierarchy.
+    // The ordered parser is configured with trimValues:false so we can count them.
+    const collectPbIndents = (items) => {
+      if (!Array.isArray(items)) return;
+      for (const el of items) {
+        const tag = ordTag(el);
+        if (!tag || tag === '#text' || tag === '?xml') continue;
+        if (tag === 'ParameterBlock') {
+          const id = ordA(el, 'Id');
+          const rawText = ordRaw(el, 'Text');
+          if (id && rawText) {
+            const leadingSpaces = rawText.match(/^(\s*)/)[1].length;
+            if (leadingSpaces > 0) pbIndentMap[id] = leadingSpaces;
+          }
+        }
+        collectPbIndents(ordChildren(el));
+      }
+    };
+    collectPbIndents(orderedXml);
     // Navigate: KNX > ManufacturerData > Manufacturer > ApplicationPrograms > ApplicationProgram > Dynamic
     const findDynamic = (items) => {
       if (!items) return null;
@@ -1102,15 +1114,12 @@ function parseKnxproj(buffer, password = null) {
           }
         }
         const hwT = (id) => hwTrans[id] || '';
-        const hwTAll = (id, baseText) => {
+        const hwTAll = (id, baseText, defaultLang) => {
           const t = hwTransAll[id] ? { ...hwTransAll[id] } : {};
           // Add base text under the manufacturer's default language
-          if (baseText && hwDefaultLang && !t[hwDefaultLang]) t[hwDefaultLang] = baseText;
+          if (baseText && defaultLang && !t[defaultLang]) t[defaultLang] = baseText;
           return Object.keys(t).length ? t : null;
         };
-        // DefaultLanguage from Hardware.xml — the language of base Text attributes on products
-        const hwXmlStr = e.getData().toString('utf8');
-        const hwDefaultLang = (hwXmlStr.match(/DefaultLanguage="([^"]+)"/) || [])[1] || '';
 
         for (const outer of toArr(mNode.Hardware)) {
           for (const hw of toArr(outer.Hardware)) {
@@ -1128,7 +1137,8 @@ function parseKnxproj(buffer, password = null) {
               const pId = a(p, 'Id');
               const baseText = a(p, 'Text') || hwName;
               const pWidth = parseFloat(a(p, 'WidthInMillimeter')) || widthMm;
-              if (pId) hwByProd[pId] = { manufacturer: mfrName, model: hwT(pId) || baseText, orderNumber: a(p, 'OrderNumber'), hwSerial, modelTranslations: hwTAll(pId, baseText), ...hwExtra, widthMm: pWidth };
+              const defaultLang = a(p, 'DefaultLanguage');
+              if (pId) hwByProd[pId] = { manufacturer: mfrName, model: hwT(pId) || baseText, orderNumber: a(p, 'OrderNumber'), hwSerial, modelTranslations: hwTAll(pId, baseText, defaultLang), ...hwExtra, widthMm: pWidth };
             }
             for (const h of [...toArr(hw?.Hardware2Programs?.Hardware2Program), ...toArr(hw?.Hardware2Program)])
               if (a(h,'Id')) hwByH2P[a(h,'Id')] = info(hwName);
