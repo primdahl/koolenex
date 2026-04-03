@@ -587,6 +587,46 @@ describe('Cascade Delete', () => {
   });
 });
 
+// ── Transaction Rollback ─────────────────────────────────────────────────────
+
+describe('Transaction Rollback', () => {
+  it('db.transaction rolls back on error', () => {
+    const countBefore = db.get('SELECT count(*) as c FROM projects').c;
+
+    assert.throws(() => {
+      db.transaction(({ run }) => {
+        run('INSERT INTO projects (name) VALUES (?)', ['Should Not Persist']);
+        throw new Error('simulated failure');
+      });
+    }, { message: 'simulated failure' });
+
+    const countAfter = db.get('SELECT count(*) as c FROM projects').c;
+    assert.equal(countAfter, countBefore, 'no project should be inserted after rollback');
+
+    const row = db.get('SELECT * FROM projects WHERE name=?', ['Should Not Persist']);
+    assert.equal(row, null, 'rolled-back row should not exist');
+  });
+
+  it('db.transaction commits on success', () => {
+    const countBefore = db.get('SELECT count(*) as c FROM projects').c;
+
+    const result = db.transaction(({ run }) => {
+      const { lastInsertRowid } = run('INSERT INTO projects (name) VALUES (?)', ['Transaction Success']);
+      return lastInsertRowid;
+    });
+
+    assert(result, 'should return the result from fn');
+    const countAfter = db.get('SELECT count(*) as c FROM projects').c;
+    assert.equal(countAfter, countBefore + 1);
+
+    const row = db.get('SELECT * FROM projects WHERE name=?', ['Transaction Success']);
+    assert(row, 'committed row should exist');
+
+    // Cleanup
+    db.run('DELETE FROM projects WHERE name=?', ['Transaction Success']);
+  });
+});
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 describe('Settings', () => {

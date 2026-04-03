@@ -540,3 +540,72 @@ describe('Smoke: API import', () => {
     assert.equal(db.get('SELECT count(*) as c FROM catalog_items WHERE project_id=?', [pid]).c, 0);
   });
 });
+
+// ── Import/Reimport Error Paths ─────────────────────────────────────────────
+
+describe('Import/Reimport Error Paths', () => {
+  it('POST /import with no file returns 400', async () => {
+    const { status, data } = await req('POST', '/projects/import', new FormData(), true);
+    assert.equal(status, 400);
+    assert.equal(data.error, 'No file uploaded');
+  });
+
+  it('POST /import with wrong file extension returns 400', async () => {
+    const form = new FormData();
+    form.append('file', new Blob(['not a knxproj']), 'readme.txt');
+    const { status, data } = await req('POST', '/projects/import', form, true);
+    assert.equal(status, 400);
+    assert.equal(data.error, 'File must be a .knxproj file');
+  });
+
+  it('POST /import with corrupt .knxproj returns 422', async () => {
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.from('this is not a valid knxproj file')]), 'corrupt.knxproj');
+    const { status, data } = await req('POST', '/projects/import', form, true);
+    assert.equal(status, 422);
+    assert(data.error.startsWith('Parse failed:'));
+  });
+
+  it('POST /import with binary (non-XML, non-encrypted) buffer returns 422', async () => {
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.from([0xFF, 0xFE, 0x00, 0x01, 0x02])]), 'binary.knxproj');
+    const { status, data } = await req('POST', '/projects/import', form, true);
+    assert.equal(status, 422);
+  });
+
+  it('POST /reimport with no file returns 400', async () => {
+    const { data: proj } = await req('POST', '/projects', { name: 'Reimport Error Test' });
+    const form = new FormData();
+    const { status, data } = await req('POST', `/projects/${proj.id}/reimport`, form, true);
+    assert.equal(status, 400);
+    assert.equal(data.error, 'No file uploaded');
+    await req('DELETE', `/projects/${proj.id}`);
+  });
+
+  it('POST /reimport with wrong file extension returns 400', async () => {
+    const { data: proj } = await req('POST', '/projects', { name: 'Reimport Error Test' });
+    const form = new FormData();
+    form.append('file', new Blob(['not a knxproj']), 'fake.xml');
+    const { status, data } = await req('POST', `/projects/${proj.id}/reimport`, form, true);
+    assert.equal(status, 400);
+    assert.equal(data.error, 'File must be a .knxproj file');
+    await req('DELETE', `/projects/${proj.id}`);
+  });
+
+  it('POST /reimport with nonexistent project returns 404', async () => {
+    const buf = fs.readFileSync(SMOKE_PROJECT);
+    const form = new FormData();
+    form.append('file', new Blob([buf]), 'smoke-test.knxproj');
+    const { status } = await req('POST', '/projects/99999/reimport', form, true);
+    assert.equal(status, 404);
+  });
+
+  it('POST /reimport with corrupt .knxproj returns 422', async () => {
+    const { data: proj } = await req('POST', '/projects', { name: 'Reimport Error Test' });
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.from('corrupt data')]), 'bad.knxproj');
+    const { status, data } = await req('POST', `/projects/${proj.id}/reimport`, form, true);
+    assert.equal(status, 422);
+    await req('DELETE', `/projects/${proj.id}`);
+  });
+});
