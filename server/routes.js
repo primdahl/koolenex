@@ -102,6 +102,13 @@ function getDptInfo(projectId) {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+// Build a tracked UPDATE helper: collects SET clauses, values, and audit diffs
+function makeTracker(old) {
+  const sets = [], vals = [], diffs = [];
+  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  return { track, sets, vals, diffs };
+}
+
 // Validate numeric route params — reject non-numeric :id, :pid, :did with 400
 router.param('id', (req, res, next, val) => { if (!/^\d+$/.test(val)) return res.status(400).json({ error: 'Invalid ID' }); next(); });
 router.param('pid', (req, res, next, val) => { if (!/^\d+$/.test(val)) return res.status(400).json({ error: 'Invalid ID' }); next(); });
@@ -609,8 +616,7 @@ router.put('/projects/:pid/devices/:did', (req, res) => {
   if (b.name !== undefined && !b.name?.trim()) return res.status(400).json({ error: 'name required' });
   const old = db.get('SELECT * FROM devices WHERE id=? AND project_id=?', [+did, +pid]);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const sets = [], vals = [], diffs = [];
-  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  const { track, sets, vals, diffs } = makeTracker(old);
   if (b.name !== undefined)              track('name', b.name.trim());
   if (b.device_type !== undefined)       track('device_type', b.device_type || 'generic');
   if (b.description !== undefined)       track('description', b.description);
@@ -772,8 +778,7 @@ router.put('/projects/:pid/gas/:gid', (req, res) => {
   if (b.name !== undefined && !b.name?.trim()) return res.status(400).json({ error: 'name required' });
   const oldGA = db.get('SELECT * FROM group_addresses WHERE id=? AND project_id=?', [+gid, +pid]);
   if (!oldGA) return res.status(404).json({ error: 'Not found' });
-  const sets = [], vals = [], diffs = [];
-  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${oldGA[col] ?? ''}" → "${newVal}"`); };
+  const { track, sets, vals, diffs } = makeTracker(oldGA);
   if (b.name !== undefined)       track('name', b.name.trim());
   if (b.dpt !== undefined)        track('dpt', b.dpt);
   if (b.description !== undefined) track('description', b.description);
@@ -810,8 +815,7 @@ router.put('/projects/:pid/topology/:tid', (req, res) => {
   const b = req.body;
   const old = db.get('SELECT * FROM topology WHERE id=? AND project_id=?', [+tid, +pid]);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const sets = [], vals = [], diffs = [];
-  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  const { track, sets, vals, diffs } = makeTracker(old);
   if (b.name !== undefined) track('name', b.name);
   if (b.medium !== undefined) track('medium', b.medium);
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
@@ -868,8 +872,7 @@ router.put('/projects/:pid/spaces/:sid', (req, res) => {
   const b = req.body;
   const old = db.get('SELECT * FROM spaces WHERE id=? AND project_id=?', [+sid, +pid]);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const sets = [], vals = [], diffs = [];
-  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  const { track, sets, vals, diffs } = makeTracker(old);
   if (b.name !== undefined) track('name', b.name.trim());
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
   vals.push(+sid);
