@@ -43,6 +43,19 @@ after(() => { server?.close(); });
 describe('Projects', () => {
   let projectId;
 
+  it('GET /projects returns an array of projects', async () => {
+    const { data: p1 } = await req('POST', '/projects', { name: 'List Test A' });
+    const { data: p2 } = await req('POST', '/projects', { name: 'List Test B' });
+    const { status, data } = await req('GET', '/projects');
+    assert.equal(status, 200);
+    assert(Array.isArray(data));
+    assert(data.some(p => p.id === p1.id));
+    assert(data.some(p => p.id === p2.id));
+    // Cleanup
+    await req('DELETE', `/projects/${p1.id}`);
+    await req('DELETE', `/projects/${p2.id}`);
+  });
+
   it('POST /projects creates a project and inserts a row', async () => {
     const { status, data } = await req('POST', '/projects', { name: 'Test Project' });
     assert.equal(status, 200);
@@ -62,10 +75,29 @@ describe('Projects', () => {
     assert.equal(countAfter, countBefore, 'no row should be inserted on validation failure');
   });
 
+  it('POST /projects rejects whitespace-only name', async () => {
+    const countBefore = db.get('SELECT count(*) as c FROM projects').c;
+    const { status } = await req('POST', '/projects', { name: '   ' });
+    assert.equal(status, 400);
+    const countAfter = db.get('SELECT count(*) as c FROM projects').c;
+    assert.equal(countAfter, countBefore);
+  });
+
+  it('GET /projects/:id returns 404 for nonexistent ID', async () => {
+    const { status } = await req('GET', '/projects/99999');
+    assert.equal(status, 404);
+  });
+
   it('PUT /projects/:id updates the name in the database', async () => {
     await req('PUT', `/projects/${projectId}`, { name: 'Renamed' });
     const row = db.get('SELECT * FROM projects WHERE id=?', [projectId]);
     assert.equal(row.name, 'Renamed');
+  });
+
+  it('PUT /projects/:id silently succeeds for nonexistent ID (no 404 check)', async () => {
+    const { status, data } = await req('PUT', '/projects/99999', { name: 'x' });
+    assert.equal(status, 200);
+    assert.equal(data, null, 'should return null for nonexistent project');
   });
 
   it('DELETE /projects/:id removes the row from the database', async () => {
@@ -116,6 +148,27 @@ describe('Devices', () => {
     assert.equal(row.manufacturer, 'ABB', 'manufacturer should be unchanged');
   });
 
+  it('PUT updates device_type field', async () => {
+    await req('PUT', `/projects/${pid}/devices/${did}`, { device_type: 'sensor' });
+    const row = db.get('SELECT device_type FROM devices WHERE id=?', [did]);
+    assert.equal(row.device_type, 'sensor');
+  });
+
+  it('PUT returns 400 for empty name', async () => {
+    const { status } = await req('PUT', `/projects/${pid}/devices/${did}`, { name: '' });
+    assert.equal(status, 400);
+  });
+
+  it('PUT returns 400 when no valid fields provided', async () => {
+    const { status } = await req('PUT', `/projects/${pid}/devices/${did}`, { floor_x: undefined, floor_y: undefined });
+    assert.equal(status, 400);
+  });
+
+  it('PUT returns 404 for nonexistent device', async () => {
+    const { status } = await req('PUT', `/projects/${pid}/devices/99999`, { comment: 'x' });
+    assert.equal(status, 404);
+  });
+
   it('PATCH status updates the status column', async () => {
     await req('PATCH', `/projects/${pid}/devices/${did}/status`, { status: 'programmed' });
     const row = db.get('SELECT * FROM devices WHERE id=?', [did]);
@@ -136,6 +189,25 @@ describe('Devices', () => {
     const vals = JSON.parse(row.param_values);
     assert.equal(vals['ref-1'], 99);
     assert.equal(vals['ref-2'], undefined, 'previous keys should be gone (full replace)');
+  });
+
+  it('PATCH param-values with empty object generates audit entry', async () => {
+    const rowsBefore = db.all('SELECT * FROM audit_log WHERE project_id=? AND entity=? ORDER BY id DESC', [pid, 'param_values']);
+    await req('PATCH', `/projects/${pid}/devices/${did}/param-values`, {});
+    const rowsAfter = db.all('SELECT * FROM audit_log WHERE project_id=? AND entity=? ORDER BY id DESC', [pid, 'param_values']);
+    assert(rowsAfter.length > rowsBefore.length, 'should generate audit entry even with empty body');
+  });
+
+  it('PATCH param-values returns 404 for nonexistent device', async () => {
+    const { status } = await req('PATCH', `/projects/${pid}/devices/99999/param-values`, { 'ref-1': 1 });
+    assert.equal(status, 404);
+  });
+
+  it('GET /projects/:id/devices lists devices', async () => {
+    const { status, data } = await req('GET', `/projects/${pid}/devices`);
+    assert.equal(status, 200);
+    assert(Array.isArray(data));
+    assert(data.some(d => d.individual_address === '1.1.1'));
   });
 
   it('DELETE removes the device row and its com_objects', async () => {
@@ -195,12 +267,70 @@ describe('Group Addresses', () => {
     assert.equal(row.dpt, '1.001', 'dpt should be unchanged');
   });
 
+  it('PUT updates dpt field', async () => {
+    const gas = db.all('SELECT * FROM group_addresses WHERE project_id=? AND address=?', [pid, '1/2/3']);
+    const gaId = gas[0].id;
+    await req('PUT', `/projects/${pid}/gas/${gaId}`, { dpt: '5.001' });
+    const row = db.get('SELECT dpt FROM group_addresses WHERE id=?', [gaId]);
+    assert.equal(row.dpt, '5.001');
+  });
+
+  it('PUT returns 400 for empty name', async () => {
+    const gas = db.all('SELECT * FROM group_addresses WHERE project_id=? AND address=?', [pid, '1/2/3']);
+    const gaId = gas[0].id;
+    const { status } = await req('PUT', `/projects/${pid}/gas/${gaId}`, { name: '' });
+    assert.equal(status, 400);
+  });
+
+  it('PUT returns 400 when no valid fields provided', async () => {
+    const gas = db.all('SELECT * FROM group_addresses WHERE project_id=? AND address=?', [pid, '1/2/3']);
+    const gaId = gas[0].id;
+    const { status } = await req('PUT', `/projects/${pid}/gas/${gaId}`, { description: undefined });
+    assert.equal(status, 400);
+  });
+
+  it('PUT returns 404 for nonexistent GA', async () => {
+    const { status } = await req('PUT', `/projects/${pid}/gas/99999`, { comment: 'x' });
+    assert.equal(status, 404);
+  });
+
   it('DELETE removes the GA row', async () => {
     const gas = db.all('SELECT * FROM group_addresses WHERE project_id=?', [pid]);
     const countBefore = gas.length;
     await req('DELETE', `/projects/${pid}/gas/${gas[0].id}`);
     const countAfter = db.get('SELECT count(*) as c FROM group_addresses WHERE project_id=?', [pid]).c;
     assert.equal(countAfter, countBefore - 1);
+  });
+
+  it('GET /gas returns ga_group_names and device mapping', async () => {
+    // Create a device and com_object linked to a GA
+    const { data: dev } = await req('POST', `/projects/${pid}/devices`, {
+      individual_address: '1.1.1', name: 'Test Dev', area: 1, line: 1,
+    });
+    await req('POST', `/projects/${pid}/gas`, { address: '3/0/1', name: 'Test GA', dpt: '1.001' });
+    db.run('INSERT INTO com_objects (project_id, device_id, object_number, name, ga_address) VALUES (?,?,?,?,?)',
+      [pid, dev.id, 0, 'CO1', '3/0/1']);
+    await req('PATCH', `/projects/${pid}/gas/group-name`, { main: 3, name: 'Test Group' });
+
+    const { status, data } = await req('GET', `/projects/${pid}/gas`);
+    assert.equal(status, 200);
+    const ga = data.find(g => g.address === '3/0/1');
+    assert(ga, 'should include the created GA');
+    assert.equal(ga.main_group_name, 'Test Group');
+    assert(ga.devices.includes('1.1.1'), 'should include linked device');
+
+    // Cleanup
+    await req('DELETE', `/projects/${pid}/devices/${dev.id}`);
+  });
+
+  it('PATCH group-name returns 400 when main is missing', async () => {
+    const { status } = await req('PATCH', `/projects/${pid}/gas/group-name`, { name: 'x' });
+    assert.equal(status, 400);
+  });
+
+  it('PATCH group-name returns 400 when name is missing', async () => {
+    const { status } = await req('PATCH', `/projects/${pid}/gas/group-name`, { main: 1 });
+    assert.equal(status, 400);
   });
 });
 
@@ -460,6 +590,14 @@ describe('Cascade Delete', () => {
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 describe('Settings', () => {
+  it('GET /settings returns all settings as key-value object', async () => {
+    const { status, data } = await req('GET', '/settings');
+    assert.equal(status, 200);
+    assert(typeof data === 'object');
+    assert('knxip_host' in data);
+    assert('knxip_port' in data);
+  });
+
   it('PATCH /settings writes to the settings table', async () => {
     await req('PATCH', '/settings', { knxip_host: '10.0.0.1', knxip_port: '3672' });
     const host = db.get("SELECT value FROM settings WHERE key='knxip_host'");
@@ -468,6 +606,14 @@ describe('Settings', () => {
     assert.equal(port.value, '3672');
     // Restore
     await req('PATCH', '/settings', { knxip_host: '224.0.23.12', knxip_port: '3671' });
+  });
+
+  it('PATCH /settings coerces non-string values to string', async () => {
+    await req('PATCH', '/settings', { active_project_id: 42 });
+    const row = db.get("SELECT value FROM settings WHERE key='active_project_id'");
+    assert.equal(row.value, '42');
+    // Cleanup
+    await req('PATCH', '/settings', { active_project_id: '' });
   });
 
   it('PATCH /settings does not write disallowed keys to the table', async () => {
@@ -741,5 +887,179 @@ describe('Com Object GA Associations', () => {
     );
     assert(rows.length >= 1, 'should have audit entry for com_object');
     assert(rows[0].detail.includes('ga_address'), 'audit detail should mention ga_address');
+  });
+});
+
+// ── Com Objects Listing ─────────────────────────────────────────────────────
+
+describe('Com Objects Listing', () => {
+  let pid, devId;
+
+  before(async () => {
+    const { data: proj } = await req('POST', '/projects', { name: 'CO List Tests' });
+    pid = proj.id;
+    const { data: dev } = await req('POST', `/projects/${pid}/devices`, {
+      individual_address: '1.1.1', name: 'Test Actuator', area: 1, line: 1,
+    });
+    devId = dev.id;
+    db.run('INSERT INTO com_objects (project_id, device_id, object_number, name) VALUES (?,?,?,?)',
+      [pid, devId, 0, 'Switch Output 1']);
+  });
+
+  after(async () => { await req('DELETE', `/projects/${pid}`); });
+
+  it('GET /comobjects returns com objects with device join', async () => {
+    const { status, data } = await req('GET', `/projects/${pid}/comobjects`);
+    assert.equal(status, 200);
+    assert(Array.isArray(data));
+    assert(data.length >= 1);
+    const co = data.find(c => c.object_number === 0);
+    assert(co);
+    assert.equal(co.device_address, '1.1.1');
+    assert.equal(co.device_name, 'Test Actuator');
+  });
+});
+
+// ── Audit Log ────────────────────────────────────────────────────────────────
+
+describe('Audit Log', () => {
+  let pid;
+
+  before(async () => {
+    const { data } = await req('POST', '/projects', { name: 'Audit Tests' });
+    pid = data.id;
+  });
+
+  after(async () => { await req('DELETE', `/projects/${pid}`); });
+
+  it('GET /audit-log returns JSON with default limit', async () => {
+    const { status, data } = await req('GET', `/projects/${pid}/audit-log`);
+    assert.equal(status, 200);
+    assert(Array.isArray(data));
+    assert(data.length <= 500, 'should respect default limit of 500');
+  });
+
+  it('GET /audit-log?limit=N respects the limit parameter', async () => {
+    const { data } = await req('GET', `/projects/${pid}/audit-log?limit=1`);
+    assert(data.length <= 1, 'should return at most 1 row');
+  });
+
+  it('creating a project inserts an audit_log row', async () => {
+    const rows = db.all('SELECT * FROM audit_log WHERE project_id=? AND action=? AND entity=?', [pid, 'create', 'project']);
+    assert(rows.length >= 1, 'should have at least one create project audit row');
+    assert.equal(rows[0].entity_id, 'Audit Tests');
+  });
+
+  it('updating a device records before/after in audit detail', async () => {
+    const { data: dev } = await req('POST', `/projects/${pid}/devices`, {
+      individual_address: '1.1.1', name: 'Test Device', area: 1, line: 1,
+    });
+    await req('PUT', `/projects/${pid}/devices/${dev.id}`, { comment: 'hello world' });
+
+    const rows = db.all('SELECT * FROM audit_log WHERE project_id=? AND action=? AND entity=? ORDER BY id DESC',
+      [pid, 'update', 'device']);
+    assert(rows.length >= 1);
+    const detail = rows[0].detail;
+    assert(detail.includes('comment'), `detail should mention changed field, got: ${detail}`);
+    assert(detail.includes('hello world'), `detail should include new value, got: ${detail}`);
+    assert(detail.includes('""'), `detail should show empty old value, got: ${detail}`);
+  });
+
+  it('updating param_values records the diff in audit detail', async () => {
+    const devRow = db.get('SELECT id FROM devices WHERE project_id=? AND individual_address=?', [pid, '1.1.1']);
+    await req('PATCH', `/projects/${pid}/devices/${devRow.id}/param-values`, { 'ref-1': 42 });
+    await req('PATCH', `/projects/${pid}/devices/${devRow.id}/param-values`, { 'ref-1': 99 });
+
+    const rows = db.all('SELECT * FROM audit_log WHERE project_id=? AND entity=? ORDER BY id DESC', [pid, 'param_values']);
+    assert(rows.length >= 2);
+    const latest = rows[0].detail;
+    assert(latest.includes('42'), `should show old value 42, got: ${latest}`);
+    assert(latest.includes('99'), `should show new value 99, got: ${latest}`);
+  });
+
+  it('CSV endpoint returns all audit columns', async () => {
+    const { status, headers, data } = await req('GET', `/projects/${pid}/audit-log/csv`);
+    assert.equal(status, 200);
+    assert(headers.get('content-type').includes('text/csv'));
+    const lines = data.split('\n');
+    assert.equal(lines[0], 'timestamp,action,entity,entity_id,detail');
+    assert(lines.length > 1, 'should have data rows');
+  });
+});
+
+// ── Telegrams ────────────────────────────────────────────────────────────────
+
+describe('Telegrams', () => {
+  let pid;
+
+  before(async () => {
+    const { data } = await req('POST', '/projects', { name: 'Telegram Tests' });
+    pid = data.id;
+    db.run('INSERT INTO bus_telegrams (project_id, src, dst, type, raw_value) VALUES (?,?,?,?,?)',
+      [pid, '1.1.1', '1/0/1', 'GroupValue_Write', '01']);
+    db.run('INSERT INTO bus_telegrams (project_id, src, dst, type, raw_value) VALUES (?,?,?,?,?)',
+      [pid, '1.1.1', '1/0/2', 'GroupValue_Write', '00']);
+  });
+
+  after(async () => { await req('DELETE', `/projects/${pid}`); });
+
+  it('GET /telegrams returns limited rows with default limit', async () => {
+    const { status, data } = await req('GET', `/projects/${pid}/telegrams`);
+    assert.equal(status, 200);
+    assert(Array.isArray(data));
+    assert(data.length <= 200, 'should respect default limit of 200');
+  });
+
+  it('GET /telegrams?limit=N respects the limit parameter', async () => {
+    const { data } = await req('GET', `/projects/${pid}/telegrams?limit=1`);
+    assert(data.length <= 1);
+  });
+
+  it('DELETE /telegrams clears all telegrams for project', async () => {
+    const countBefore = db.get('SELECT count(*) as c FROM bus_telegrams WHERE project_id=?', [pid]).c;
+    assert(countBefore >= 2);
+    const { status } = await req('DELETE', `/projects/${pid}/telegrams`);
+    assert.equal(status, 200);
+    const countAfter = db.get('SELECT count(*) as c FROM bus_telegrams WHERE project_id=?', [pid]).c;
+    assert.equal(countAfter, 0);
+  });
+});
+
+// ── Parameter Model ─────────────────────────────────────────────────────────
+
+describe('Parameter Model', () => {
+  let pid, devId;
+
+  before(async () => {
+    const { data } = await req('POST', '/projects', { name: 'Param Model Tests' });
+    pid = data.id;
+    const { data: dev } = await req('POST', `/projects/${pid}/devices`, {
+      individual_address: '1.1.1', name: 'Test Device', area: 1, line: 1,
+    });
+    devId = dev.id;
+  });
+
+  after(async () => { await req('DELETE', `/projects/${pid}`); });
+
+  it('GET /devices/:did/param-model returns 404 for nonexistent device', async () => {
+    const { status } = await req('GET', `/projects/${pid}/devices/99999/param-model`);
+    assert.equal(status, 404);
+  });
+
+  it('GET /devices/:did/param-model returns no_model when device has no app_ref', async () => {
+    const { status, data } = await req('GET', `/projects/${pid}/devices/${devId}/param-model`);
+    assert.equal(status, 404);
+    assert.equal(data.error, 'no_model');
+  });
+});
+
+// ── Health ───────────────────────────────────────────────────────────────────
+
+describe('Health', () => {
+  it('GET /health returns ok with timestamp', async () => {
+    const { status, data } = await req('GET', '/health');
+    assert.equal(status, 200);
+    assert.equal(data.ok, true);
+    assert(data.ts, 'should include timestamp');
   });
 });
