@@ -1848,3 +1848,4 @@ module.exports.normalizeDptKey = normalizeDptKey;
 module.exports.decodeRawValue = decodeRawValue;
 module.exports.buildGATable = buildGATable;
 module.exports.buildAssocTable = buildAssocTable;
+module.exports.etsTestMatch = etsTestMatch;

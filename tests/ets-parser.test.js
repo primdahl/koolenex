@@ -100,4 +100,19 @@ describe('interp()', () => {
     assert.equal(interp('{{0: Channel A}}', {}), 'Channel A');
     assert.equal(interp('Move {{0: Shutter}}', {}), 'Move Shutter');
   });
+
+  test('passes through string with no placeholders', () => {
+    assert.equal(interp('Plain text', {}), 'Plain text');
+    assert.equal(interp('No placeholders here', { argCH: 'X' }), 'No placeholders here');
+  });
+
+  test('passes through malformed unclosed {{', () => {
+    assert.equal(interp('Hello {{world', {}), 'Hello {{world');
+    assert.equal(interp('Test {{', {}), 'Test {{');
+  });
+
+  test('handles empty default {{0: }}', () => {
+    assert.equal(interp('{{0: }}', {}), '');
+    assert.equal(interp('Label: {{0: }}', {}), 'Label', 'trailing colon is stripped after empty default resolves');
+  });
 });

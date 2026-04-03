@@ -266,6 +266,22 @@ describe('APDU: apduGroupWrite', () => {
     assert.equal(p.apciName, 'GroupValue_Write');
     assert.equal(p.apduData.length, 2);
   });
+
+  it('encodes DPT 5 value ≤ 0x3F as short data', () => {
+    const apdu = apduGroupWrite(63, '5.001');
+    assert.equal(apdu.length, 2);
+    assert.equal(apdu[1] & 0x3F, 63);
+  });
+
+  it('encodes DPT 5 value > 0x3F as extended data', () => {
+    const apdu = apduGroupWrite(64, '5.001');
+    assert.equal(apdu.length, 3);  // 2-byte header + 1-byte payload
+    const cemi = buildCEMI('1.1.1', '1/0/0', apdu, true);
+    const p = parseCEMI(cemi);
+    assert.equal(p.apciName, 'GroupValue_Write');
+    assert.equal(p.apduData.length, 1);
+    assert.equal(p.apduData[0], 64);
+  });
 });
 
 describe('APDU: apduGroupResponse', () => {

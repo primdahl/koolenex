@@ -15,7 +15,7 @@ const {
 } = require('../server/knx-connection');
 
 const {
-  writeKnxFloat16, writeBits, normalizeDptKey, decodeRawValue,
+  writeKnxFloat16, writeBits, normalizeDptKey, decodeRawValue, etsTestMatch,
 } = require('../server/routes');
 
 // ── DPT encoding ────────────────────────────────────────────────────────────
@@ -528,6 +528,31 @@ describe('parseCEMI', () => {
     const parsed = parseCEMI(cemi);
     assert.equal(parsed.tpciType, 'DATA_GROUP');
   });
+
+  it('parses MC.IND (0x29) frame', () => {
+    const apdu = Buffer.from([0x00, 0x81]); // GroupValue_Write, data=1
+    const cemi = buildCEMI('1.1.5', '1/0/0', apdu, true);
+    cemi[0] = MC.IND;  // patch to indication
+    const parsed = parseCEMI(cemi);
+    assert(parsed);
+    assert.equal(parsed.msgCode, MC.IND);
+    assert.equal(parsed.src, '1.1.5');
+    assert.equal(parsed.dst, '1/0/0');
+    assert.equal(parsed.isGroup, true);
+    assert.equal(parsed.apciName, 'GroupValue_Write');
+  });
+
+  it('parses MC.CON (0x2E) frame', () => {
+    const apdu = Buffer.from([0x00, 0x81]);
+    const cemi = buildCEMI('1.1.5', '1/0/0', apdu, true);
+    cemi[0] = MC.CON;  // patch to confirmation
+    const parsed = parseCEMI(cemi);
+    assert(parsed);
+    assert.equal(parsed.msgCode, MC.CON);
+    assert.equal(parsed.src, '1.1.5');
+    assert.equal(parsed.dst, '1/0/0');
+    assert.equal(parsed.apciName, 'GroupValue_Write');
+  });
 });
 
 // ── decodeRawValue (pure DPT-aware decode) ──────────────────────────────────
@@ -673,5 +698,96 @@ describe('decodeRawValue', () => {
 
   it('returns null for non-hex characters', () => {
     assert.equal(decodeRawValue('zzzz', '9.001', {}), null);
+  });
+});
+
+// ── etsTestMatch ────────────────────────────────────────────────────────────
+
+describe('etsTestMatch', () => {
+  it('exact string match', () => {
+    assert.equal(etsTestMatch('1', ['1']), true);
+    assert.equal(etsTestMatch('0', ['1']), false);
+    assert.equal(etsTestMatch('hello', ['hello']), true);
+    assert.equal(etsTestMatch('hello', ['world']), false);
+  });
+
+  it('matches any in list', () => {
+    assert.equal(etsTestMatch('2', ['1', '2', '3']), true);
+    assert.equal(etsTestMatch('5', ['1', '2', '3']), false);
+  });
+
+  it('= operator', () => {
+    assert.equal(etsTestMatch('5', ['=5']), true);
+    assert.equal(etsTestMatch('5', ['=6']), false);
+    assert.equal(etsTestMatch('0', ['=0']), true);
+  });
+
+  it('!= operator', () => {
+    assert.equal(etsTestMatch('5', ['!=5']), false);
+    assert.equal(etsTestMatch('5', ['!=6']), true);
+    assert.equal(etsTestMatch('0', ['!=0']), false);
+    assert.equal(etsTestMatch('0', ['!=1']), true);
+  });
+
+  it('< operator', () => {
+    assert.equal(etsTestMatch('3', ['<5']), true);
+    assert.equal(etsTestMatch('5', ['<5']), false);
+    assert.equal(etsTestMatch('7', ['<5']), false);
+  });
+
+  it('> operator', () => {
+    assert.equal(etsTestMatch('7', ['>5']), true);
+    assert.equal(etsTestMatch('5', ['>5']), false);
+    assert.equal(etsTestMatch('3', ['>5']), false);
+  });
+
+  it('<= operator', () => {
+    assert.equal(etsTestMatch('3', ['<=5']), true);
+    assert.equal(etsTestMatch('5', ['<=5']), true);
+    assert.equal(etsTestMatch('7', ['<=5']), false);
+  });
+
+  it('>= operator', () => {
+    assert.equal(etsTestMatch('7', ['>=5']), true);
+    assert.equal(etsTestMatch('5', ['>=5']), true);
+    assert.equal(etsTestMatch('3', ['>=5']), false);
+  });
+
+  it('negative values', () => {
+    assert.equal(etsTestMatch('-1', ['=-1']), true);
+    assert.equal(etsTestMatch('-5', ['>-3']), false);
+    assert.equal(etsTestMatch('-5', ['<-3']), true);
+    assert.equal(etsTestMatch('-3', ['>=-3']), true);
+    assert.equal(etsTestMatch('-3', ['<=-3']), true);
+  });
+
+  it('decimal values', () => {
+    assert.equal(etsTestMatch('2.5', ['>2']), true);
+    assert.equal(etsTestMatch('2.5', ['<3']), true);
+    assert.equal(etsTestMatch('2.5', ['=2.5']), true);
+    assert.equal(etsTestMatch('2.5', ['!=2.5']), false);
+  });
+
+  it('returns false for empty/null tests', () => {
+    assert.equal(etsTestMatch('1', []), false);
+    assert.equal(etsTestMatch('1', null), false);
+    assert.equal(etsTestMatch('1', undefined), false);
+  });
+
+  it('skips relational ops when value is NaN', () => {
+    assert.equal(etsTestMatch('abc', ['>0']), false);
+    assert.equal(etsTestMatch('abc', ['<0']), false);
+    assert.equal(etsTestMatch('abc', ['=0']), false);
+    assert.equal(etsTestMatch('abc', ['!=0']), false);
+  });
+
+  it('NaN still matches exact string', () => {
+    assert.equal(etsTestMatch('abc', ['abc']), true);
+  });
+
+  it('mixed relational and exact tests', () => {
+    assert.equal(etsTestMatch('5', ['>10', '5']), true);   // fails >10, matches exact '5'
+    assert.equal(etsTestMatch('5', ['>10', '<3']), false);  // fails both
+    assert.equal(etsTestMatch('5', ['!=5', '>4']), true);   // fails !=5, matches >4
   });
 });
