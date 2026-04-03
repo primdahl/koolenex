@@ -316,7 +316,9 @@ async function init() {
 
 function save() {
   const data = db.export();          // Uint8Array
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
+  fs.writeFile(DB_PATH, Buffer.from(data), (err) => {
+    if (err) console.error('[DB] save error:', err.message);
+  });
 }
 
 // Debounced save — avoids hammering disk during bulk imports
@@ -356,7 +358,8 @@ function get(sql, params = []) {
 function run(sql, params = []) {
   db.run(sql, params);
   const lastInsertRowid = db.exec("SELECT last_insert_rowid() as id")[0]?.values[0][0] ?? null;
-  return { lastInsertRowid };
+  const changes = db.exec("SELECT changes() as c")[0]?.values[0][0] ?? 0;
+  return { lastInsertRowid, changes };
 }
 
 /**

@@ -85,7 +85,7 @@ function encodeDpt(value, dpt) {
       let mant = Math.round(v * 100), exp = 0;
       while (mant < -2048 || mant > 2047) { mant = Math.round(mant / 2); exp++; }
       const sign = mant < 0 ? 1 : 0;
-      if (sign) mant = mant + 2048; // two's complement 11-bit
+      if (sign) mant = mant + 2048; // sign-magnitude 11-bit: store absolute value
       const raw = ((sign & 1) << 15) | ((exp & 0xF) << 11) | (mant & 0x7FF);
       const b = Buffer.alloc(2); b.writeUInt16BE(raw & 0xFFFF); return b;
     }
@@ -281,6 +281,9 @@ class KnxConnection extends EventEmitter {
     return { ok: true, ga, value, dpt };
   }
 
+  // Note: no request correlation ID — concurrent reads to the same GA could
+  // consume each other's responses. KNX has no request/response correlation
+  // at the group level, so this is a protocol-level limitation, not a bug.
   read(ga, timeoutMs = 4000) {
     if (!this.connected) throw new Error('Not connected');
     return new Promise(async (resolve, reject) => {

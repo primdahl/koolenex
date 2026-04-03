@@ -102,6 +102,11 @@ function getDptInfo(projectId) {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+// Validate numeric route params — reject non-numeric :id, :pid, :did with 400
+router.param('id', (req, res, next, val) => { if (!/^\d+$/.test(val)) return res.status(400).json({ error: 'Invalid ID' }); next(); });
+router.param('pid', (req, res, next, val) => { if (!/^\d+$/.test(val)) return res.status(400).json({ error: 'Invalid ID' }); next(); });
+router.param('did', (req, res, next, val) => { if (!/^\d+$/.test(val)) return res.status(400).json({ error: 'Invalid ID' }); next(); });
+
 // ── RTF to HTML conversion ────────────────────────────────────────────────────
 const rtfToHTML = require('@iarna/rtf-to-html');
 
@@ -280,15 +285,10 @@ router.delete('/projects/:id', (req, res) => {
   // Cascade manually (sql.js doesn't enforce FK by default in all cases)
   const pid = +req.params.id;
   db.transaction(({ run }) => {
-    const devIds = db.all('SELECT id FROM devices WHERE project_id=?', [pid]).map(r => r.id);
-    const gaIds  = db.all('SELECT id FROM group_addresses WHERE project_id=?', [pid]).map(r => r.id);
-    if (devIds.length) {
-      run(`DELETE FROM com_objects WHERE device_id IN (${devIds.join(',')})`, []);
-      run(`DELETE FROM devices WHERE project_id=?`, [pid]);
-    }
-    if (gaIds.length) {
-      run(`DELETE FROM group_addresses WHERE project_id=?`, [pid]);
-    }
+    // Delete com_objects via subquery instead of string-interpolated ID list
+    run('DELETE FROM com_objects WHERE device_id IN (SELECT id FROM devices WHERE project_id=?)', [pid]);
+    run('DELETE FROM devices WHERE project_id=?', [pid]);
+    run('DELETE FROM group_addresses WHERE project_id=?', [pid]);
     run('DELETE FROM bus_telegrams WHERE project_id=?', [pid]);
     run('DELETE FROM ga_group_names WHERE project_id=?', [pid]);
     run('DELETE FROM topology WHERE project_id=?', [pid]);
