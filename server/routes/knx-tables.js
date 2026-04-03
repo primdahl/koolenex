@@ -250,57 +250,50 @@ function resolveParamSegment(model) {
 // relSegHex: optional hex string from Static/Code/RelativeSegment/Data — when present,
 //   used as the base buffer (encodes factory defaults) instead of a fill byte.
 function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegHex = null, dynTree = null, params = null) {
-  // Detect convention: when all directly-mapped params (Union children with Offset attr) have
-  // offset=0, the device uses the relSeg blob as a monolithic default.
-  const hasPerParamOffsets = Object.values(paramMemLayout).some(
-    i => !i.isText && !i.fromMemoryChild && i.offset > 0
-  );
-  const relSegConvention = !!relSegHex && !hasPerParamOffsets;
-
   const relSegBase = relSegHex ? Buffer.from(relSegHex, 'hex') : null;
 
+  // Start with relSeg blob as base (factory defaults), or fill byte if no blob
   let buf;
-  let paramShift = 0; // offset adjustment for param writes
-  if (relSegHex) {
-    const base = relSegBase;
-    if (relSegConvention) {
-      buf = Buffer.alloc(size, 0x00);
-      base.copy(buf, 0, 0, Math.min(base.length, size));
-      paramShift = 0;
-    } else {
-      buf = Buffer.alloc(size, fill);
-      base.copy(buf, 0, 0, Math.min(base.length, size));
-      paramShift = 0;
-    }
+  if (relSegBase) {
+    buf = Buffer.alloc(size, fill);
+    relSegBase.copy(buf, 0, 0, Math.min(relSegBase.length, size));
   } else {
     buf = Buffer.alloc(size, fill);
   }
-  const conditionallyActive = (relSegHex && dynTree && params)
+
+  // Determine which params are conditionally active based on choose/when evaluation
+  const conditionallyActive = (dynTree && params)
     ? evalConditionallyActiveParamRefs(dynTree, params, currentValues)
     : null;
-  const unconditionalChannel = (relSegHex && dynTree)
+  const unconditionalChannel = dynTree
     ? buildUnconditionalChannelSet(dynTree)
     : null;
 
   for (const [prId, info] of Object.entries(paramMemLayout)) {
     if (info.offset === null || info.offset === undefined) continue;
-    if (relSegHex && info.offset === 0) continue;
+
+    // Determine if this param should be written based on conditional visibility
     if (info.fromMemoryChild) {
-      if (!info.isVisible && prId in currentValues) { /* allow */ }
-      else if (unconditionalChannel && unconditionalChannel.has(prId)) { /* allow */ }
-      else {
+      if (!info.isVisible && prId in currentValues) {
+        // User explicitly set a hidden param — write it
+      } else if (unconditionalChannel && unconditionalChannel.has(prId)) {
+        // Unconditionally visible — write it
+      } else {
+        // Conditionally visible — only write if the choose/when branch is active
         const passConditional = conditionallyActive && conditionallyActive.has(prId) && info.isVisible;
         if (!passConditional) continue;
       }
     }
+
     const rawVal = prId in currentValues ? currentValues[prId] : info.defaultValue;
     if (rawVal === '' || rawVal === null || rawVal === undefined) continue;
-    const writeOff = (relSegConvention && info.fromMemoryChild) ? info.offset + paramShift : info.offset;
+
+    // Write at the exact offset — no shifting, no convention detection
     if (info.isText) {
       const byteSize = Math.floor(info.bitSize / 8);
-      if (writeOff + byteSize > buf.length) continue;
+      if (info.offset + byteSize > buf.length) continue;
       const strBuf = Buffer.from(rawVal, 'latin1');
-      strBuf.copy(buf, writeOff, 0, Math.min(strBuf.length, byteSize));
+      strBuf.copy(buf, info.offset, 0, Math.min(strBuf.length, byteSize));
       continue;
     }
     if (info.isFloat) {
@@ -308,18 +301,18 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
       if (isNaN(fVal)) continue;
       const scaledVal = info.coefficient ? fVal / info.coefficient : fVal;
       if (info.bitSize === 16) {
-        writeKnxFloat16(buf, writeOff, scaledVal);
+        writeKnxFloat16(buf, info.offset, scaledVal);
       } else if (info.bitSize === 32) {
-        if (writeOff + 4 <= buf.length) buf.writeFloatBE(scaledVal, writeOff);
+        if (info.offset + 4 <= buf.length) buf.writeFloatBE(scaledVal, info.offset);
       } else if (info.bitSize === 64) {
-        if (writeOff + 8 <= buf.length) buf.writeDoubleBE(scaledVal, writeOff);
+        if (info.offset + 8 <= buf.length) buf.writeDoubleBE(scaledVal, info.offset);
       }
       continue;
     }
     const numVal = parseFloat(rawVal);
     if (isNaN(numVal)) continue;
     const intVal = info.coefficient ? Math.round(numVal / info.coefficient) : Math.round(numVal);
-    writeBits(buf, writeOff, info.bitOffset, info.bitSize, intVal);
+    writeBits(buf, info.offset, info.bitOffset, info.bitSize, intVal);
   }
 
   // Process Assign operations
@@ -328,7 +321,6 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
     for (const { target, source, value } of activeAssigns) {
       const targetInfo = paramMemLayout[target];
       if (!targetInfo || targetInfo.offset === null || targetInfo.offset === undefined) continue;
-      if (relSegHex && targetInfo.offset === 0) continue;
       let rawVal;
       if (source) {
         const sourceParam = params[source];
@@ -340,8 +332,7 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
       if (rawVal === '' || rawVal === null || rawVal === undefined) continue;
       const intVal = parseInt(rawVal);
       if (isNaN(intVal)) continue;
-      const writeOff = (relSegConvention && targetInfo.fromMemoryChild) ? targetInfo.offset + paramShift : targetInfo.offset;
-      writeBits(buf, writeOff, targetInfo.bitOffset, targetInfo.bitSize, intVal);
+      writeBits(buf, targetInfo.offset, targetInfo.bitOffset, targetInfo.bitSize, intVal);
     }
   }
 
