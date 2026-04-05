@@ -13,17 +13,19 @@ class KnxBusManager extends EventEmitter {
   constructor() {
     super();
     this.connection = null;
-    this.connected  = false;
-    this.host       = null;
-    this.port       = 3671;
-    this.type       = null;   // 'udp' or 'usb'
-    this.projectId  = null;
-    this._wss       = null;
-    this._remapFn   = null;
+    this.connected = false;
+    this.host = null;
+    this.port = 3671;
+    this.type = null; // 'udp' or 'usb'
+    this.projectId = null;
+    this._wss = null;
+    this._remapFn = null;
   }
 
   /** Set a function that remaps telegram src/dst addresses (for demo mode) */
-  setRemapper(fn) { this._remapFn = fn; }
+  setRemapper(fn) {
+    this._remapFn = fn;
+  }
 
   attachWSS(wss) {
     this._wss = wss;
@@ -32,7 +34,7 @@ class KnxBusManager extends EventEmitter {
   broadcast(type, payload) {
     if (!this._wss) return;
     const msg = JSON.stringify({ type, ...payload });
-    this._wss.clients.forEach(client => {
+    this._wss.clients.forEach((client) => {
       if (client.readyState === 1) client.send(msg);
     });
   }
@@ -41,7 +43,10 @@ class KnxBusManager extends EventEmitter {
     conn.on('telegram', (telegram) => {
       const tg = { ...telegram, projectId: this.projectId };
       const mapped = this._remapFn ? this._remapFn(tg) : tg;
-      this.broadcast('knx:telegram', { telegram: mapped, projectId: this.projectId });
+      this.broadcast('knx:telegram', {
+        telegram: mapped,
+        projectId: this.projectId,
+      });
       this.emit('telegram', mapped);
     });
 
@@ -59,17 +64,17 @@ class KnxBusManager extends EventEmitter {
   connect(host, port, projectId) {
     if (this.connection) this.disconnect();
 
-    this.host      = host;
-    this.port      = port || 3671;
+    this.host = host;
+    this.port = port || 3671;
     this.projectId = projectId;
-    this.type      = 'udp';
+    this.type = 'udp';
 
     const conn = new KnxIpConnection();
     this._attachEvents(conn);
 
     return conn.connect(host, this.port).then(() => {
       this.connection = conn;
-      this.connected  = true;
+      this.connected = true;
       console.log(`[KNX] Connected to ${host}:${this.port}`);
       this.broadcast('knx:connected', { host, port: this.port, type: 'udp' });
       return { host, port: this.port };
@@ -80,16 +85,16 @@ class KnxBusManager extends EventEmitter {
     if (this.connection) this.disconnect();
 
     this.projectId = projectId;
-    this.type      = 'usb';
-    this.host      = null;
-    this.port      = null;
+    this.type = 'usb';
+    this.host = null;
+    this.port = null;
 
     const conn = new KnxUsbConnection();
     this._attachEvents(conn);
 
     return conn.connect(devicePath).then((info) => {
       this.connection = conn;
-      this.connected  = true;
+      this.connected = true;
       console.log(`[KNX] Connected via USB: ${devicePath}`);
       this.broadcast('knx:connected', { type: 'usb', path: devicePath });
       return info;
@@ -108,36 +113,43 @@ class KnxBusManager extends EventEmitter {
 
   disconnect() {
     if (this.connection) {
-      try { this.connection.disconnect(); } catch (_) {}
+      try {
+        this.connection.disconnect();
+      } catch (_) {}
       this.connection = null;
     }
     this.connected = false;
-    this.host      = null;
-    this.type      = null;
+    this.host = null;
+    this.type = null;
   }
 
   write(groupAddress, value, dpt = '1') {
-    if (!this.connection || !this.connected) throw new Error('Not connected to KNX bus');
+    if (!this.connection || !this.connected)
+      throw new Error('Not connected to KNX bus');
     return this.connection.write(groupAddress, value, dpt);
   }
 
   read(groupAddress) {
-    if (!this.connection || !this.connected) throw new Error('Not connected to KNX bus');
+    if (!this.connection || !this.connected)
+      throw new Error('Not connected to KNX bus');
     return this.connection.read(groupAddress);
   }
 
   ping(gaAddresses, deviceAddress = null, timeoutMs = 2000) {
-    if (!this.connection || !this.connected) return Promise.reject(new Error('Not connected to KNX bus'));
+    if (!this.connection || !this.connected)
+      return Promise.reject(new Error('Not connected to KNX bus'));
     return this.connection.ping(gaAddresses, deviceAddress, timeoutMs);
   }
 
   identify(deviceAddress) {
-    if (!this.connection || !this.connected) return Promise.reject(new Error('Not connected to KNX bus'));
+    if (!this.connection || !this.connected)
+      return Promise.reject(new Error('Not connected to KNX bus'));
     return this.connection.identify(deviceAddress);
   }
 
   scan(area, line, timeoutMs = 200, onProgress = null) {
-    if (!this.connection || !this.connected) return Promise.reject(new Error('Not connected to KNX bus'));
+    if (!this.connection || !this.connected)
+      return Promise.reject(new Error('Not connected to KNX bus'));
     return this.connection.scan(area, line, timeoutMs, onProgress);
   }
 
@@ -146,27 +158,37 @@ class KnxBusManager extends EventEmitter {
   }
 
   readDeviceInfo(deviceAddr) {
-    if (!this.connection || !this.connected) return Promise.reject(new Error('Not connected to KNX bus'));
+    if (!this.connection || !this.connected)
+      return Promise.reject(new Error('Not connected to KNX bus'));
     return this.connection.readDeviceInfo(deviceAddr);
   }
 
   programIA(newAddr) {
-    if (!this.connection || !this.connected) return Promise.reject(new Error('Not connected to KNX bus'));
+    if (!this.connection || !this.connected)
+      return Promise.reject(new Error('Not connected to KNX bus'));
     return this.connection.programIA(newAddr);
   }
 
   downloadDevice(deviceAddr, steps, gaTable, assocTable, paramMem, onProgress) {
-    if (!this.connection || !this.connected) return Promise.reject(new Error('Not connected to KNX bus'));
-    return this.connection.downloadDevice(deviceAddr, steps, gaTable, assocTable, paramMem, onProgress);
+    if (!this.connection || !this.connected)
+      return Promise.reject(new Error('Not connected to KNX bus'));
+    return this.connection.downloadDevice(
+      deviceAddr,
+      steps,
+      gaTable,
+      assocTable,
+      paramMem,
+      onProgress,
+    );
   }
 
   status() {
     return {
       connected: this.connected,
-      type:      this.type,
-      host:      this.host,
-      port:      this.port,
-      hasLib:    true,
+      type: this.type,
+      host: this.host,
+      port: this.port,
+      hasLib: true,
     };
   }
 }

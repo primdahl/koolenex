@@ -1,10 +1,22 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useC } from '../theme.js';
-import { Btn, Spinner, SearchBox, SectionHeader, Empty } from '../primitives.jsx';
+import {
+  Btn,
+  Spinner,
+  SearchBox,
+  SectionHeader,
+  Empty,
+} from '../primitives.jsx';
 import { api } from '../api.js';
 import { AddDeviceModal } from '../AddDeviceModal.jsx';
 
-export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo }) {
+export function CatalogView({
+  activeProjectId,
+  data,
+  onAddDevice,
+  onPin,
+  jumpTo,
+}) {
   const C = useC();
   const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -17,10 +29,16 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
   const load = () => {
     if (!activeProjectId) return;
     setLoading(true);
-    api.getCatalog(activeProjectId).then(setCatalog).catch(() => setCatalog(null)).finally(() => setLoading(false));
+    api
+      .getCatalog(activeProjectId)
+      .then(setCatalog)
+      .catch(() => setCatalog(null))
+      .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [activeProjectId]);
+  useEffect(() => {
+    load();
+  }, [activeProjectId]);
 
   // Handle jumpTo — expand the target manufacturer's first-level sections, collapse all others
   useEffect(() => {
@@ -62,7 +80,8 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
     });
   };
 
-  const toggleSection = (id) => setExpandedSections(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggleSection = (id) =>
+    setExpandedSections((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const sq = search.toLowerCase();
 
@@ -73,16 +92,24 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
 
     // Filter items by search
     const filteredItems = sq
-      ? items.filter(i => i.name.toLowerCase().includes(sq) || i.order_number.toLowerCase().includes(sq) || i.manufacturer.toLowerCase().includes(sq) || i.description.toLowerCase().includes(sq))
+      ? items.filter(
+          (i) =>
+            i.name.toLowerCase().includes(sq) ||
+            i.order_number.toLowerCase().includes(sq) ||
+            i.manufacturer.toLowerCase().includes(sq) ||
+            i.description.toLowerCase().includes(sq),
+        )
       : items;
 
     // Build section map
     const sectionMap = {};
-    for (const s of sections) sectionMap[s.id] = { ...s, children: [], items: [] };
+    for (const s of sections)
+      sectionMap[s.id] = { ...s, children: [], items: [] };
 
     // Assign items to sections
     for (const item of filteredItems) {
-      if (sectionMap[item.section_id]) sectionMap[item.section_id].items.push(item);
+      if (sectionMap[item.section_id])
+        sectionMap[item.section_id].items.push(item);
     }
 
     // Build parent-child relationships
@@ -105,7 +132,10 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
     roots.forEach(countItems);
 
     // Filter out empty sections when searching
-    const prune = (nodes) => nodes.filter(n => n.totalItems > 0).map(n => ({ ...n, children: prune(n.children) }));
+    const prune = (nodes) =>
+      nodes
+        .filter((n) => n.totalItems > 0)
+        .map((n) => ({ ...n, children: prune(n.children) }));
     const prunedRoots = sq ? prune(roots) : roots;
 
     // Group roots by manufacturer
@@ -115,7 +145,9 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
       if (!byMfr[mfr]) byMfr[mfr] = [];
       byMfr[mfr].push(r);
     }
-    const mfrGroups = Object.entries(byMfr).sort(([a], [b]) => a.localeCompare(b));
+    const mfrGroups = Object.entries(byMfr).sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
 
     return { mfrGroups, filteredItemCount: filteredItems.length };
   }, [catalog, sq]);
@@ -127,20 +159,36 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
     const hasContent = node.children.length > 0 || node.items.length > 0;
     return (
       <div key={node.id}>
-        <div onClick={() => hasContent && toggleSection(node.id)}
+        <div
+          onClick={() => hasContent && toggleSection(node.id)}
           style={{
-            display: 'flex', alignItems: 'center', gap: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             padding: `4px 14px 4px ${14 + depth * 16}px`,
             background: depth === 0 ? C.surface : 'transparent',
             borderBottom: `1px solid ${C.border}`,
             cursor: hasContent ? 'pointer' : 'default',
             userSelect: 'none',
-          }}>
-          {hasContent
-            ? <span style={{ fontSize: 9, color: C.dim, width: 10 }}>{isOpen ? '▾' : '▸'}</span>
-            : <span style={{ width: 10 }} />}
-          <span style={{ fontSize: depth === 0 ? 11 : 10, fontWeight: depth <= 1 ? 600 : 400, color: depth === 0 ? C.accent : C.text, flex: 1 }}>
-            {node.number ? `${node.number} ` : ''}{node.name}
+          }}
+        >
+          {hasContent ? (
+            <span style={{ fontSize: 9, color: C.dim, width: 10 }}>
+              {isOpen ? '▾' : '▸'}
+            </span>
+          ) : (
+            <span style={{ width: 10 }} />
+          )}
+          <span
+            style={{
+              fontSize: depth === 0 ? 11 : 10,
+              fontWeight: depth <= 1 ? 600 : 400,
+              color: depth === 0 ? C.accent : C.text,
+              flex: 1,
+            }}
+          >
+            {node.number ? `${node.number} ` : ''}
+            {node.name}
           </span>
           <span style={{ fontSize: 9, color: C.dim }}>{node.totalItems}</span>
         </div>
@@ -148,37 +196,106 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
           <>
             {node.items.length > 0 && (
               <div>
-                {node.items.map(item => (
-                  <div key={item.id}
+                {node.items.map((item) => (
+                  <div
+                    key={item.id}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
                       padding: `5px 14px 5px ${14 + (depth + 1) * 16}px`,
                       borderBottom: `1px solid ${C.border}11`,
                       fontSize: 10,
-                    }}>
+                    }}
+                  >
                     {item.in_use ? (
-                      <span onClick={onPin ? () => onPin('model', item.model || item.name) : undefined}
-                        style={{ color: C.green, fontSize: 10, flexShrink: 0, cursor: onPin ? 'pointer' : 'default', padding: '0 2px' }}
-                        title="View devices of this type" className="bg">●</span>
+                      <span
+                        onClick={
+                          onPin
+                            ? () => onPin('model', item.model || item.name)
+                            : undefined
+                        }
+                        style={{
+                          color: C.green,
+                          fontSize: 10,
+                          flexShrink: 0,
+                          cursor: onPin ? 'pointer' : 'default',
+                          padding: '0 2px',
+                        }}
+                        title="View devices of this type"
+                        className="bg"
+                      >
+                        ●
+                      </span>
                     ) : (
-                      <span style={{ color: C.dim, fontSize: 10, flexShrink: 0, padding: '0 2px' }}>○</span>
+                      <span
+                        style={{
+                          color: C.dim,
+                          fontSize: 10,
+                          flexShrink: 0,
+                          padding: '0 2px',
+                        }}
+                      >
+                        ○
+                      </span>
                     )}
-                    <span onClick={item.in_use && onPin ? () => onPin('model', item.model || item.name) : undefined}
-                      style={{ color: C.text, flex: 1, cursor: item.in_use && onPin ? 'pointer' : 'default' }}
-                      className={item.in_use && onPin ? 'bg' : undefined}>{item.name}</span>
-                    {item.order_number && <span onClick={onPin ? () => onPin('order_number', item.order_number) : undefined}
-                      style={{ color: C.dim, fontFamily: 'monospace', fontSize: 9, flexShrink: 0, cursor: onPin ? 'pointer' : 'default' }}
-                      className={onPin ? 'bg' : undefined}>{item.order_number}</span>}
+                    <span
+                      onClick={
+                        item.in_use && onPin
+                          ? () => onPin('model', item.model || item.name)
+                          : undefined
+                      }
+                      style={{
+                        color: C.text,
+                        flex: 1,
+                        cursor: item.in_use && onPin ? 'pointer' : 'default',
+                      }}
+                      className={item.in_use && onPin ? 'bg' : undefined}
+                    >
+                      {item.name}
+                    </span>
+                    {item.order_number && (
+                      <span
+                        onClick={
+                          onPin
+                            ? () => onPin('order_number', item.order_number)
+                            : undefined
+                        }
+                        style={{
+                          color: C.dim,
+                          fontFamily: 'monospace',
+                          fontSize: 9,
+                          flexShrink: 0,
+                          cursor: onPin ? 'pointer' : 'default',
+                        }}
+                        className={onPin ? 'bg' : undefined}
+                      >
+                        {item.order_number}
+                      </span>
+                    )}
                     {onAddDevice && (
-                      <span onClick={() => handleAddFromCatalog(item)}
-                        style={{ fontSize: 9, padding: '1px 6px', borderRadius: 10, background: `${C.green}18`, color: C.green, border: `1px solid ${C.green}30`, cursor: 'pointer', flexShrink: 0 }}
-                        className="bg">+ Add</span>
+                      <span
+                        onClick={() => handleAddFromCatalog(item)}
+                        style={{
+                          fontSize: 9,
+                          padding: '1px 6px',
+                          borderRadius: 10,
+                          background: `${C.green}18`,
+                          color: C.green,
+                          border: `1px solid ${C.green}30`,
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                        className="bg"
+                      >
+                        + Add
+                      </span>
                     )}
                   </div>
                 ))}
               </div>
             )}
-            {node.children.map(child => renderSection(child, depth + 1))}
+            {node.children.map((child) => renderSection(child, depth + 1))}
           </>
         )}
       </div>
@@ -186,34 +303,106 @@ export function CatalogView({ activeProjectId, data, onAddDevice, onPin, jumpTo 
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <SectionHeader title="Product Catalog" count={filteredItemCount} actions={[
-        <SearchBox key="s" value={search} onChange={setSearch} placeholder="Search products…" />,
-        <Btn key="imp" onClick={() => fileRef.current?.click()} color={C.accent} bg={C.surface} disabled={importing}>
-          {importing ? <><Spinner /> Importing…</> : '+ Import .knxprod'}
-        </Btn>,
-      ]} />
-      <input ref={fileRef} type="file" accept=".knxprod" onChange={handleImportKnxprod} style={{ display: 'none' }} />
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <SectionHeader
+        title="Product Catalog"
+        count={filteredItemCount}
+        actions={[
+          <SearchBox
+            key="s"
+            value={search}
+            onChange={setSearch}
+            placeholder="Search products…"
+          />,
+          <Btn
+            key="imp"
+            onClick={() => fileRef.current?.click()}
+            color={C.accent}
+            bg={C.surface}
+            disabled={importing}
+          >
+            {importing ? (
+              <>
+                <Spinner /> Importing…
+              </>
+            ) : (
+              '+ Import .knxprod'
+            )}
+          </Btn>,
+        ]}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".knxprod"
+        onChange={handleImportKnxprod}
+        style={{ display: 'none' }}
+      />
 
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {loading && <div style={{ padding: 20, textAlign: 'center' }}><Spinner /> Loading catalog…</div>}
-        {!loading && catalog && filteredItemCount === 0 && (
-          <Empty icon="◈" msg={sq ? 'No products match search' : 'No catalog data — reimport your .knxproj or import a .knxprod file'} />
-        )}
-        {!loading && catalog && mfrGroups.map(([mfr, sections]) => (
-          <div key={mfr}>
-            <div style={{ padding: '8px 14px', background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span onClick={onPin ? () => onPin('manufacturer', mfr) : undefined}
-                style={{ color: C.amber, fontSize: 11, fontWeight: 700, cursor: onPin ? 'pointer' : 'default' }}
-                className={onPin ? 'bg' : undefined}>{mfr}</span>
-              <span style={{ color: C.dim, fontSize: 10 }}>· {sections.reduce((s, n) => s + n.totalItems, 0)} products</span>
-            </div>
-            {sections.map(sec => renderSection(sec, 0))}
+        {loading && (
+          <div style={{ padding: 20, textAlign: 'center' }}>
+            <Spinner /> Loading catalog…
           </div>
-        ))}
+        )}
+        {!loading && catalog && filteredItemCount === 0 && (
+          <Empty
+            icon="◈"
+            msg={
+              sq
+                ? 'No products match search'
+                : 'No catalog data — reimport your .knxproj or import a .knxprod file'
+            }
+          />
+        )}
+        {!loading &&
+          catalog &&
+          mfrGroups.map(([mfr, sections]) => (
+            <div key={mfr}>
+              <div
+                style={{
+                  padding: '8px 14px',
+                  background: C.surface,
+                  borderBottom: `1px solid ${C.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <span
+                  onClick={onPin ? () => onPin('manufacturer', mfr) : undefined}
+                  style={{
+                    color: C.amber,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: onPin ? 'pointer' : 'default',
+                  }}
+                  className={onPin ? 'bg' : undefined}
+                >
+                  {mfr}
+                </span>
+                <span style={{ color: C.dim, fontSize: 10 }}>
+                  · {sections.reduce((s, n) => s + n.totalItems, 0)} products
+                </span>
+              </div>
+              {sections.map((sec) => renderSection(sec, 0))}
+            </div>
+          ))}
       </div>
       {addDefaults && onAddDevice && (
-        <AddDeviceModal data={data} defaults={addDefaults} onAdd={onAddDevice} onClose={() => setAddDefaults(null)} />
+        <AddDeviceModal
+          data={data}
+          defaults={addDefaults}
+          onAdd={onAddDevice}
+          onClose={() => setAddDefaults(null)}
+        />
       )}
     </div>
   );

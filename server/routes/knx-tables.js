@@ -7,37 +7,41 @@
 function buildGATable(gaLinks) {
   const count = gaLinks.length;
   const buf = Buffer.alloc(1 + count * 2);
-  buf[0] = count & 0xFF;
+  buf[0] = count & 0xff;
   gaLinks.forEach((ga, i) => {
-    const b0 = ((ga.main_g & 0x1F) << 3) | (ga.middle_g & 0x07);
-    const b1 = ga.sub_g & 0xFF;
+    const b0 = ((ga.main_g & 0x1f) << 3) | (ga.middle_g & 0x07);
+    const b1 = ga.sub_g & 0xff;
     buf[1 + i * 2] = b0;
     buf[2 + i * 2] = b1;
   });
   return buf;
 }
 
-
 // Build association table bytes: [count(1)] + [CO_num(1), GA_idx(1)] x count
 // coRows: array of { object_number, ga_address } from com_objects
 // gaLinks: sorted GA list (GA index = position in sorted list)
 function buildAssocTable(coRows, gaLinks) {
   const gaIndexMap = {};
-  gaLinks.forEach((ga, i) => { gaIndexMap[ga.address] = i; });
+  gaLinks.forEach((ga, i) => {
+    gaIndexMap[ga.address] = i;
+  });
 
   const entries = [];
   for (const co of coRows) {
     const gas = (co.ga_address || '').split(/\s+/).filter(Boolean);
     for (const gaAddr of gas) {
       const gaIdx = gaIndexMap[gaAddr];
-      if (gaIdx != null) entries.push([co.object_number & 0xFF, gaIdx & 0xFF]);
+      if (gaIdx != null) entries.push([co.object_number & 0xff, gaIdx & 0xff]);
     }
   }
 
   entries.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
   const buf = Buffer.alloc(1 + entries.length * 2);
-  buf[0] = entries.length & 0xFF;
-  entries.forEach(([co, ga], i) => { buf[1 + i * 2] = co; buf[2 + i * 2] = ga; });
+  buf[0] = entries.length & 0xff;
+  entries.forEach(([co, ga], i) => {
+    buf[1 + i * 2] = co;
+    buf[2 + i * 2] = ga;
+  });
   return buf;
 }
 
@@ -46,18 +50,21 @@ function buildAssocTable(coRows, gaLinks) {
 function etsTestMatch(val, tests) {
   const n = parseFloat(val);
   for (const t of tests || []) {
-    const rm = typeof t === 'string' && t.match(/^(!=|=|[<>]=?)(-?\d+(?:\.\d+)?)$/);
+    const rm =
+      typeof t === 'string' && t.match(/^(!=|=|[<>]=?)(-?\d+(?:\.\d+)?)$/);
     if (rm) {
       if (isNaN(n)) continue;
       const rv = parseFloat(rm[2]);
       const op = rm[1];
-      if (op === '<'  && n <  rv) return true;
-      if (op === '>'  && n >  rv) return true;
+      if (op === '<' && n < rv) return true;
+      if (op === '>' && n > rv) return true;
       if (op === '<=' && n <= rv) return true;
       if (op === '>=' && n >= rv) return true;
-      if (op === '='  && n === rv) return true;
+      if (op === '=' && n === rv) return true;
       if (op === '!=' && n !== rv) return true;
-    } else if (String(t) === val) { return true; }
+    } else if (String(t) === val) {
+      return true;
+    }
   }
   return false;
 }
@@ -78,12 +85,12 @@ function buildUnconditionalChannelSet(dynTree) {
   function walk(node) {
     if (!node) return;
     for (const r of node.paramRefs || []) s.add(r);
-    for (const b of node.blocks   || []) walk(b);
+    for (const b of node.blocks || []) walk(b);
     // Do NOT walk into choices — params inside choices are conditional
   }
   for (const ch of dynTree?.main?.channels || []) walk(ch.node);
-  for (const ci of dynTree?.main?.cib      || []) walk(ci);
-  for (const pb of dynTree?.main?.pb       || []) walk(pb);
+  for (const ci of dynTree?.main?.cib || []) walk(ci);
+  for (const pb of dynTree?.main?.pb || []) walk(pb);
   return s;
 }
 
@@ -93,19 +100,30 @@ function evalConditionallyActiveParamRefs(dynTree, params, currentValues) {
     if (prKey in currentValues) return String(currentValues[prKey]);
     return String(params[prKey]?.defaultValue ?? '');
   };
-  function evalChoice(choice, inChoice) {
+  function evalChoice(choice, _inChoice) {
     const raw = getVal(choice.paramRefId);
-    const val = String(raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''));
-    let matched = false, defNode = null;
+    const val = String(
+      raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''),
+    );
+    let matched = false,
+      defNode = null;
     for (const w of choice.whens || []) {
-      if (w.isDefault) { defNode = w.node; continue; }
-      if (etsTestMatch(val, w.test)) { matched = true; walkNode(w.node, true); }
+      if (w.isDefault) {
+        defNode = w.node;
+        continue;
+      }
+      if (etsTestMatch(val, w.test)) {
+        matched = true;
+        walkNode(w.node, true);
+      }
     }
     if (!matched && defNode) walkNode(defNode, true);
   }
   function walkNode(node, inChoice) {
     if (!node) return;
-    for (const r of node.paramRefs || []) { if (inChoice) conditional.add(r); }
+    for (const r of node.paramRefs || []) {
+      if (inChoice) conditional.add(r);
+    }
     for (const b of node.blocks || []) walkNode(b, inChoice);
     for (const choice of node.choices || []) evalChoice(choice, inChoice);
   }
@@ -140,14 +158,14 @@ function writeKnxFloat16(buf, byteOffset, value) {
   }
   const sign = m < 0 ? 1 : 0;
   if (sign) m = m + 2048; // two's complement 11-bit: negative mantissa stored as 2048 + m
-  const raw = (sign << 15) | ((e & 0xF) << 11) | (m & 0x7FF);
-  buf[byteOffset]     = (raw >> 8) & 0xFF;
-  buf[byteOffset + 1] = raw & 0xFF;
+  const raw = (sign << 15) | ((e & 0xf) << 11) | (m & 0x7ff);
+  buf[byteOffset] = (raw >> 8) & 0xff;
+  buf[byteOffset + 1] = raw & 0xff;
 }
 
 function writeBits(buf, byteOffset, bitOffset, bitSize, value) {
   if (byteOffset >= buf.length || bitSize <= 0) return;
-  const mask = bitSize >= 32 ? 0xFFFFFFFF : (1 << bitSize) - 1;
+  const mask = bitSize >= 32 ? 0xffffffff : (1 << bitSize) - 1;
   value = value & mask;
   // Byte-aligned multi-byte: write big-endian (KNX/ETS standard)
   if (bitOffset === 0 && bitSize % 8 === 0) {
@@ -155,7 +173,7 @@ function writeBits(buf, byteOffset, bitOffset, bitSize, value) {
     for (let i = 0; i < byteCount; i++) {
       const bIdx = byteOffset + i;
       if (bIdx >= buf.length) continue;
-      buf[bIdx] = (value >>> ((byteCount - 1 - i) * 8)) & 0xFF;
+      buf[bIdx] = (value >>> ((byteCount - 1 - i) * 8)) & 0xff;
     }
     return;
   }
@@ -163,15 +181,20 @@ function writeBits(buf, byteOffset, bitOffset, bitSize, value) {
   // Handle spanning two bytes by splitting recursively (matches ETS DptValueConverter.WriteBits).
   if (bitOffset + bitSize > 8) {
     const bitsInFirstByte = 8 - bitOffset;
-    writeBits(buf, byteOffset,     bitOffset, bitsInFirstByte, value >>> (bitSize - bitsInFirstByte));
-    writeBits(buf, byteOffset + 1, 0,         bitSize - bitsInFirstByte, value);
+    writeBits(
+      buf,
+      byteOffset,
+      bitOffset,
+      bitsInFirstByte,
+      value >>> (bitSize - bitsInFirstByte),
+    );
+    writeBits(buf, byteOffset + 1, 0, bitSize - bitsInFirstByte, value);
     return;
   }
   const shift = 8 - bitOffset - bitSize;
   const bmask = ((1 << bitSize) - 1) << shift;
   buf[byteOffset] = (buf[byteOffset] & ~bmask) | ((value << shift) & bmask);
 }
-
 
 // Collect Assign operations whose when-branch is currently active.
 // Returns array of { target, source, value } where source is a paramRef key (or null for literal assigns).
@@ -189,11 +212,20 @@ function collectActiveAssigns(dynTree, params, currentValues) {
   }
   function evalChoice(choice) {
     const raw = getVal(choice.paramRefId);
-    const val = String(raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''));
-    let matched = false, defNode = null;
+    const val = String(
+      raw !== '' && raw != null ? raw : (choice.defaultValue ?? ''),
+    );
+    let matched = false,
+      defNode = null;
     for (const w of choice.whens || []) {
-      if (w.isDefault) { defNode = w.node; continue; }
-      if (etsTestMatch(val, w.test)) { matched = true; walkNode(w.node); }
+      if (w.isDefault) {
+        defNode = w.node;
+        continue;
+      }
+      if (etsTestMatch(val, w.test)) {
+        matched = true;
+        walkNode(w.node);
+      }
     }
     if (!matched && defNode) walkNode(defNode);
   }
@@ -213,35 +245,47 @@ function collectActiveAssigns(dynTree, params, currentValues) {
 function resolveParamSegment(model) {
   const lps = model.loadProcedures || [];
   // Try RelativeSegment path first (most common)
-  const writeMemStep = lps.find(s => s.type === 'WriteRelMem');
-  const relSegStep   = lps.find(s => s.type === 'RelSegment');
+  const writeMemStep = lps.find((s) => s.type === 'WriteRelMem');
+  const relSegStep = lps.find((s) => s.type === 'RelSegment');
   if (writeMemStep || relSegStep) {
-    const paramSize   = writeMemStep?.size || relSegStep?.size || 0;
-    const paramFill   = relSegStep?.fill ?? 0xFF;
+    const paramSize = writeMemStep?.size || relSegStep?.size || 0;
+    const paramFill = relSegStep?.fill ?? 0xff;
     const paramLsmIdx = relSegStep?.lsmIdx ?? 4;
-    const relSegHex   = model.relSegData?.[paramLsmIdx] || null;
+    const relSegHex = model.relSegData?.[paramLsmIdx] || null;
     return { paramSize, paramFill, relSegHex };
   }
   // Try AbsoluteSegment path: find the segment whose address range covers the parameter offsets.
   const absSegs = model.absSegData || {};
   const layout = model.paramMemLayout || {};
-  const paramOffsets = Object.values(layout).map(v => v.offset).filter(v => v != null);
+  const paramOffsets = Object.values(layout)
+    .map((v) => v.offset)
+    .filter((v) => v != null);
   if (paramOffsets.length === 0 || Object.keys(absSegs).length === 0) {
-    return { paramSize: 0, paramFill: 0xFF, relSegHex: null };
+    return { paramSize: 0, paramFill: 0xff, relSegHex: null };
   }
   const maxOffset = Math.max(...paramOffsets);
   // Find the AbsoluteSegment that contains the parameter range.
-  for (const [addr, seg] of Object.entries(absSegs)) {
+  for (const seg of Object.values(absSegs)) {
     if (seg.size > maxOffset) {
-      return { paramSize: seg.size, paramFill: 0x00, relSegHex: seg.hex || null };
+      return {
+        paramSize: seg.size,
+        paramFill: 0x00,
+        relSegHex: seg.hex || null,
+      };
     }
   }
   // Fallback: use the largest segment
-  const largest = Object.entries(absSegs).sort((a, b) => b[1].size - a[1].size)[0];
+  const largest = Object.entries(absSegs).sort(
+    (a, b) => b[1].size - a[1].size,
+  )[0];
   if (largest) {
-    return { paramSize: largest[1].size, paramFill: 0x00, relSegHex: largest[1].hex || null };
+    return {
+      paramSize: largest[1].size,
+      paramFill: 0x00,
+      relSegHex: largest[1].hex || null,
+    };
   }
-  return { paramSize: 0, paramFill: 0xFF, relSegHex: null };
+  return { paramSize: 0, paramFill: 0xff, relSegHex: null };
 }
 
 // Build parameter memory segment from the paramMemLayout (all params, including hidden ones).
@@ -249,7 +293,15 @@ function resolveParamSegment(model) {
 // fill: byte value to initialize the buffer with (from LdCtrlRelSegment.@Fill)
 // relSegHex: optional hex string from Static/Code/RelativeSegment/Data — when present,
 //   used as the base buffer (encodes factory defaults) instead of a fill byte.
-function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegHex = null, dynTree = null, params = null) {
+function buildParamMem(
+  size,
+  paramMemLayout,
+  currentValues,
+  fill = 0xff,
+  relSegHex = null,
+  dynTree = null,
+  params = null,
+) {
   const relSegBase = relSegHex ? Buffer.from(relSegHex, 'hex') : null;
 
   // Start with relSeg blob as base (factory defaults), or fill byte if no blob
@@ -262,9 +314,10 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
   }
 
   // Determine which params are conditionally active based on choose/when evaluation
-  const conditionallyActive = (dynTree && params)
-    ? evalConditionallyActiveParamRefs(dynTree, params, currentValues)
-    : null;
+  const conditionallyActive =
+    dynTree && params
+      ? evalConditionallyActiveParamRefs(dynTree, params, currentValues)
+      : null;
   const unconditionalChannel = dynTree
     ? buildUnconditionalChannelSet(dynTree)
     : null;
@@ -280,12 +333,16 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
         // Unconditionally visible — write it
       } else {
         // Conditionally visible — only write if the choose/when branch is active
-        const passConditional = conditionallyActive && conditionallyActive.has(prId) && info.isVisible;
+        const passConditional =
+          conditionallyActive &&
+          conditionallyActive.has(prId) &&
+          info.isVisible;
         if (!passConditional) continue;
       }
     }
 
-    const rawVal = prId in currentValues ? currentValues[prId] : info.defaultValue;
+    const rawVal =
+      prId in currentValues ? currentValues[prId] : info.defaultValue;
     if (rawVal === '' || rawVal === null || rawVal === undefined) continue;
 
     // Write at the exact offset — no shifting, no convention detection
@@ -303,15 +360,19 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
       if (info.bitSize === 16) {
         writeKnxFloat16(buf, info.offset, scaledVal);
       } else if (info.bitSize === 32) {
-        if (info.offset + 4 <= buf.length) buf.writeFloatBE(scaledVal, info.offset);
+        if (info.offset + 4 <= buf.length)
+          buf.writeFloatBE(scaledVal, info.offset);
       } else if (info.bitSize === 64) {
-        if (info.offset + 8 <= buf.length) buf.writeDoubleBE(scaledVal, info.offset);
+        if (info.offset + 8 <= buf.length)
+          buf.writeDoubleBE(scaledVal, info.offset);
       }
       continue;
     }
     const numVal = parseFloat(rawVal);
     if (isNaN(numVal)) continue;
-    const intVal = info.coefficient ? Math.round(numVal / info.coefficient) : Math.round(numVal);
+    const intVal = info.coefficient
+      ? Math.round(numVal / info.coefficient)
+      : Math.round(numVal);
     writeBits(buf, info.offset, info.bitOffset, info.bitSize, intVal);
   }
 
@@ -320,19 +381,33 @@ function buildParamMem(size, paramMemLayout, currentValues, fill = 0xFF, relSegH
     const activeAssigns = collectActiveAssigns(dynTree, params, currentValues);
     for (const { target, source, value } of activeAssigns) {
       const targetInfo = paramMemLayout[target];
-      if (!targetInfo || targetInfo.offset === null || targetInfo.offset === undefined) continue;
+      if (
+        !targetInfo ||
+        targetInfo.offset === null ||
+        targetInfo.offset === undefined
+      )
+        continue;
       let rawVal;
       if (source) {
         const sourceParam = params[source];
         if (!sourceParam) continue;
-        rawVal = source in currentValues ? currentValues[source] : sourceParam.defaultValue;
+        rawVal =
+          source in currentValues
+            ? currentValues[source]
+            : sourceParam.defaultValue;
       } else {
         rawVal = value;
       }
       if (rawVal === '' || rawVal === null || rawVal === undefined) continue;
       const intVal = parseInt(rawVal);
       if (isNaN(intVal)) continue;
-      writeBits(buf, targetInfo.offset, targetInfo.bitOffset, targetInfo.bitSize, intVal);
+      writeBits(
+        buf,
+        targetInfo.offset,
+        targetInfo.bitOffset,
+        targetInfo.bitSize,
+        intVal,
+      );
     }
   }
 

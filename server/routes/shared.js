@@ -1,6 +1,6 @@
 'use strict';
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 const { XMLParser } = require('fast-xml-parser');
 
 // ── Per-project knx_master.xml ─────────────────────────────────────────────────
@@ -31,15 +31,32 @@ const _translationCache = {};
 const _mediumTypeCache = {};
 const _maskVersionCache = {};
 
-const toArr = v => v == null ? [] : Array.isArray(v) ? v : [v];
+const toArr = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
 function parseMasterXml(xml) {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
-    isArray: name => ['DatapointType','DatapointSubtype','Float','UnsignedInteger','SignedInteger',
-      'Enumeration','EnumValue','Bit','MaskVersion','Language','TranslationUnit',
-      'TranslationElement','Translation','SpaceUsage','MediumType','FunctionType','FunctionPoint'].includes(name),
+    isArray: (name) =>
+      [
+        'DatapointType',
+        'DatapointSubtype',
+        'Float',
+        'UnsignedInteger',
+        'SignedInteger',
+        'Enumeration',
+        'EnumValue',
+        'Bit',
+        'MaskVersion',
+        'Language',
+        'TranslationUnit',
+        'TranslationElement',
+        'Translation',
+        'SpaceUsage',
+        'MediumType',
+        'FunctionType',
+        'FunctionPoint',
+      ].includes(name),
   });
   return parser.parse(xml);
 }
@@ -57,13 +74,16 @@ function getDptInfo(projectId) {
     for (const sub of toArr(dpt?.DatapointSubtypes?.DatapointSubtype)) {
       const key = `${mainNum}.${String(sub['@_Number']).padStart(3, '0')}`;
       const fmt = sub?.Format || {};
-      let unit = '', enums = null, coefficient = null;
+      let unit = '',
+        enums = null,
+        coefficient = null;
 
-      for (const tag of ['Float','UnsignedInteger','SignedInteger']) {
+      for (const tag of ['Float', 'UnsignedInteger', 'SignedInteger']) {
         const arr = toArr(fmt[tag]);
         if (arr.length) {
           unit = arr[0]['@_Unit'] || '';
-          if (arr[0]['@_Coefficient']) coefficient = parseFloat(arr[0]['@_Coefficient']);
+          if (arr[0]['@_Coefficient'])
+            coefficient = parseFloat(arr[0]['@_Coefficient']);
           break;
         }
       }
@@ -85,7 +105,8 @@ function getDptInfo(projectId) {
       result[key] = {
         name: sub['@_Name'] || '',
         text: sub['@_Text'] || '',
-        unit, sizeInBit,
+        unit,
+        sizeInBit,
         ...(coefficient != null ? { coefficient } : {}),
         ...(enums ? { enums } : {}),
       };
@@ -96,8 +117,14 @@ function getDptInfo(projectId) {
 
 // Build a tracked UPDATE helper: collects SET clauses, values, and audit diffs
 function makeTracker(old) {
-  const sets = [], vals = [], diffs = [];
-  const track = (col, newVal) => { sets.push(`${col}=?`); vals.push(newVal); diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`); };
+  const sets = [],
+    vals = [],
+    diffs = [];
+  const track = (col, newVal) => {
+    sets.push(`${col}=?`);
+    vals.push(newVal);
+    diffs.push(`${col}: "${old[col] ?? ''}" → "${newVal}"`);
+  };
   return { track, sets, vals, diffs };
 }
 
@@ -106,8 +133,11 @@ function saveModelsAndMasterXml(paramModels, knxMasterXml, projectId) {
   if (paramModels) {
     for (const [appId, model] of Object.entries(paramModels)) {
       try {
-        const safe = appId.replace(/[^a-zA-Z0-9_\-]/g, '_');
-        fs.writeFileSync(path.join(APPS_DIR, safe + '.json'), JSON.stringify(model));
+        const safe = appId.replace(/[^a-zA-Z0-9_-]/g, '_');
+        fs.writeFileSync(
+          path.join(APPS_DIR, safe + '.json'),
+          JSON.stringify(model),
+        );
       } catch (_) {}
     }
   }

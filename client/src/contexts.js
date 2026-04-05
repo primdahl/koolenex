@@ -39,8 +39,8 @@ export function useDpt() {
       if (!raw) return undefined;
       const f = formats(raw);
       const parts = [];
-      if (mode !== 'numeric')  parts.push(f.numeric);
-      if (mode !== 'formal')   parts.push(f.formal);
+      if (mode !== 'numeric') parts.push(f.numeric);
+      if (mode !== 'formal') parts.push(f.formal);
       if (mode !== 'friendly' && f.friendly) parts.push(f.friendly);
       return parts.filter(Boolean).join(' — ') || undefined;
     },

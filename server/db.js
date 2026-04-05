@@ -1,19 +1,34 @@
 'use strict';
 /**
  * Database layer using sql.js (pure JavaScript SQLite — no native compilation).
- * 
+ *
  * sql.js runs the database in memory. We persist it to disk by writing the binary
  * .db file after every mutating operation. On startup we load from disk if it exists.
  */
 
 const initSqlJs = require('sql.js');
 const path = require('path');
-const fs   = require('fs');
+const fs = require('fs');
 
 const DB_PATH = path.join(__dirname, '..', 'koolenex.db');
 
-let SQL = null;  // sql.js module
-let db  = null;  // Database instance
+let SQL = null; // sql.js module
+let db = null; // Database instance
+
+function buildGAMaps(comObjects) {
+  const deviceGAMap = {},
+    gaDeviceMap = {};
+  for (const co of comObjects) {
+    const da = co.device_address;
+    for (const ga of (co.ga_address || '').split(/\s+/).filter(Boolean)) {
+      if (!deviceGAMap[da]) deviceGAMap[da] = [];
+      if (!deviceGAMap[da].includes(ga)) deviceGAMap[da].push(ga);
+      if (!gaDeviceMap[ga]) gaDeviceMap[ga] = [];
+      if (!gaDeviceMap[ga].includes(da)) gaDeviceMap[ga].push(da);
+    }
+  }
+  return { deviceGAMap, gaDeviceMap };
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -29,7 +44,7 @@ async function init() {
     console.log('[DB] Created new database at', DB_PATH);
   }
 
-  db.run("PRAGMA foreign_keys = ON");
+  db.run('PRAGMA foreign_keys = ON');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -97,8 +112,12 @@ async function init() {
     )
   `);
   // Migrations for existing databases
-  try { db.run("ALTER TABLE com_objects ADD COLUMN ga_send TEXT DEFAULT ''"); } catch {}
-  try { db.run("ALTER TABLE com_objects ADD COLUMN ga_receive TEXT DEFAULT ''"); } catch {}
+  try {
+    db.run("ALTER TABLE com_objects ADD COLUMN ga_send TEXT DEFAULT ''");
+  } catch {}
+  try {
+    db.run("ALTER TABLE com_objects ADD COLUMN ga_receive TEXT DEFAULT ''");
+  } catch {}
 
   // Legacy table — kept for backward compatibility but no longer used.
   // Device↔GA mappings are now derived from com_objects.ga_address.
@@ -149,46 +168,46 @@ async function init() {
     try {
       const cols = db.exec(`PRAGMA table_info(${table})`)[0];
       if (!cols) return;
-      const exists = cols.values.some(row => row[1] === col);
+      const exists = cols.values.some((row) => row[1] === col);
       if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
     } catch (_) {}
   };
-  migrate('devices', 'comment',             "TEXT DEFAULT ''");
-  migrate('devices', 'order_number',        "TEXT DEFAULT ''");
-  migrate('devices', 'serial_number',       "TEXT DEFAULT ''");
-  migrate('devices', 'last_modified',       "TEXT DEFAULT ''");
-  migrate('devices', 'last_download',       "TEXT DEFAULT ''");
-  migrate('devices', 'area_name',           "TEXT DEFAULT ''");
-  migrate('devices', 'line_name',           "TEXT DEFAULT ''");
-  migrate('devices', 'medium',              "TEXT DEFAULT 'TP'");
-  migrate('group_addresses', 'comment',           "TEXT DEFAULT ''");
-  migrate('group_addresses', 'main_group_name',   "TEXT DEFAULT ''");
+  migrate('devices', 'comment', "TEXT DEFAULT ''");
+  migrate('devices', 'order_number', "TEXT DEFAULT ''");
+  migrate('devices', 'serial_number', "TEXT DEFAULT ''");
+  migrate('devices', 'last_modified', "TEXT DEFAULT ''");
+  migrate('devices', 'last_download', "TEXT DEFAULT ''");
+  migrate('devices', 'area_name', "TEXT DEFAULT ''");
+  migrate('devices', 'line_name', "TEXT DEFAULT ''");
+  migrate('devices', 'medium', "TEXT DEFAULT 'TP'");
+  migrate('group_addresses', 'comment', "TEXT DEFAULT ''");
+  migrate('group_addresses', 'main_group_name', "TEXT DEFAULT ''");
   migrate('group_addresses', 'middle_group_name', "TEXT DEFAULT ''");
-  migrate('com_objects', 'channel',     "TEXT DEFAULT ''");
+  migrate('com_objects', 'channel', "TEXT DEFAULT ''");
   migrate('com_objects', 'object_size', "TEXT DEFAULT ''");
-  migrate('devices',     'space_id',    "INTEGER");
-  migrate('devices',     'parameters',  "TEXT DEFAULT '[]'");
-  migrate('devices',     'app_ref',     "TEXT DEFAULT ''");
-  migrate('devices',     'param_values',"TEXT DEFAULT '{}'");
-  migrate('spaces',      'usage_id',    "TEXT DEFAULT ''");
-  migrate('devices',     'model_translations', "TEXT DEFAULT '{}'");
-  migrate('devices',     'bus_current',     "INTEGER DEFAULT 0");
-  migrate('devices',     'width_mm',        "REAL DEFAULT 0");
-  migrate('devices',     'is_power_supply', "INTEGER DEFAULT 0");
-  migrate('devices',     'is_coupler',      "INTEGER DEFAULT 0");
-  migrate('devices',     'is_rail_mounted', "INTEGER DEFAULT 0");
-  migrate('projects',    'thumbnail',   "TEXT DEFAULT ''");
-  migrate('projects',    'project_info',"TEXT DEFAULT ''");
-  migrate('devices',     'installation_hints', "TEXT DEFAULT ''");
+  migrate('devices', 'space_id', 'INTEGER');
+  migrate('devices', 'parameters', "TEXT DEFAULT '[]'");
+  migrate('devices', 'app_ref', "TEXT DEFAULT ''");
+  migrate('devices', 'param_values', "TEXT DEFAULT '{}'");
+  migrate('spaces', 'usage_id', "TEXT DEFAULT ''");
+  migrate('devices', 'model_translations', "TEXT DEFAULT '{}'");
+  migrate('devices', 'bus_current', 'INTEGER DEFAULT 0');
+  migrate('devices', 'width_mm', 'REAL DEFAULT 0');
+  migrate('devices', 'is_power_supply', 'INTEGER DEFAULT 0');
+  migrate('devices', 'is_coupler', 'INTEGER DEFAULT 0');
+  migrate('devices', 'is_rail_mounted', 'INTEGER DEFAULT 0');
+  migrate('projects', 'thumbnail', "TEXT DEFAULT ''");
+  migrate('projects', 'project_info', "TEXT DEFAULT ''");
+  migrate('devices', 'installation_hints', "TEXT DEFAULT ''");
   migrate('group_addresses', 'description', "TEXT DEFAULT ''");
-  migrate('devices', 'floor_x', "REAL DEFAULT -1");
-  migrate('devices', 'floor_y', "REAL DEFAULT -1");
-  migrate('catalog_items', 'model',           "TEXT DEFAULT ''");
-  migrate('catalog_items', 'bus_current',     "INTEGER DEFAULT 0");
-  migrate('catalog_items', 'width_mm',        "REAL DEFAULT 0");
-  migrate('catalog_items', 'is_power_supply', "INTEGER DEFAULT 0");
-  migrate('catalog_items', 'is_coupler',      "INTEGER DEFAULT 0");
-  migrate('catalog_items', 'is_rail_mounted', "INTEGER DEFAULT 0");
+  migrate('devices', 'floor_x', 'REAL DEFAULT -1');
+  migrate('devices', 'floor_y', 'REAL DEFAULT -1');
+  migrate('catalog_items', 'model', "TEXT DEFAULT ''");
+  migrate('catalog_items', 'bus_current', 'INTEGER DEFAULT 0');
+  migrate('catalog_items', 'width_mm', 'REAL DEFAULT 0');
+  migrate('catalog_items', 'is_power_supply', 'INTEGER DEFAULT 0');
+  migrate('catalog_items', 'is_coupler', 'INTEGER DEFAULT 0');
+  migrate('catalog_items', 'is_rail_mounted', 'INTEGER DEFAULT 0');
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_mode', '')`);
   db.run(`INSERT OR IGNORE INTO settings VALUES ('demo_addr_map', '')`);
 
@@ -209,14 +228,28 @@ async function init() {
     const hasRows = all('SELECT count(*) as c FROM topology').c;
     if (!hasRows) {
       // Migrate areas
-      const areas = all("SELECT DISTINCT project_id, area, area_name FROM devices WHERE area_name != '' AND area_name IS NOT NULL");
+      const areas = all(
+        "SELECT DISTINCT project_id, area, area_name FROM devices WHERE area_name != '' AND area_name IS NOT NULL",
+      );
       for (const r of areas) {
-        try { db.run('INSERT OR IGNORE INTO topology (project_id, area, line, name, medium) VALUES (?,?,NULL,?,?)', [r.project_id, r.area, r.area_name, 'TP']); } catch (_) {}
+        try {
+          db.run(
+            'INSERT OR IGNORE INTO topology (project_id, area, line, name, medium) VALUES (?,?,NULL,?,?)',
+            [r.project_id, r.area, r.area_name, 'TP'],
+          );
+        } catch (_) {}
       }
       // Migrate lines
-      const lines = all("SELECT DISTINCT project_id, area, line, line_name, medium FROM devices");
+      const lines = all(
+        'SELECT DISTINCT project_id, area, line, line_name, medium FROM devices',
+      );
       for (const r of lines) {
-        try { db.run('INSERT OR IGNORE INTO topology (project_id, area, line, name, medium) VALUES (?,?,?,?,?)', [r.project_id, r.area, r.line, r.line_name || '', r.medium || 'TP']); } catch (_) {}
+        try {
+          db.run(
+            'INSERT OR IGNORE INTO topology (project_id, area, line, name, medium) VALUES (?,?,?,?,?)',
+            [r.project_id, r.area, r.line, r.line_name || '', r.medium || 'TP'],
+          );
+        } catch (_) {}
       }
     }
   } catch (_) {}
@@ -270,27 +303,28 @@ async function init() {
 
   // Migrate existing redundant columns into ga_group_names (one-time)
   try {
-    const cols = db.exec("PRAGMA table_info(group_addresses)")[0];
-    const hasMainGN = cols && cols.values.some(r => r[1] === 'main_group_name');
+    const cols = db.exec('PRAGMA table_info(group_addresses)')[0];
+    const hasMainGN =
+      cols && cols.values.some((r) => r[1] === 'main_group_name');
     if (hasMainGN) {
       // Migrate main group names
       const mains = all(
-        "SELECT DISTINCT project_id, main_g, main_group_name FROM group_addresses WHERE main_group_name != ''"
+        "SELECT DISTINCT project_id, main_g, main_group_name FROM group_addresses WHERE main_group_name != ''",
       );
       for (const r of mains) {
         db.run(
-          "INSERT OR IGNORE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,-1,?)",
-          [r.project_id, r.main_g, r.main_group_name]
+          'INSERT OR IGNORE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,-1,?)',
+          [r.project_id, r.main_g, r.main_group_name],
         );
       }
       // Migrate middle group names
       const mids = all(
-        "SELECT DISTINCT project_id, main_g, middle_g, middle_group_name FROM group_addresses WHERE middle_group_name != ''"
+        "SELECT DISTINCT project_id, main_g, middle_g, middle_group_name FROM group_addresses WHERE middle_group_name != ''",
       );
       for (const r of mids) {
         db.run(
-          "INSERT OR IGNORE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)",
-          [r.project_id, r.main_g, r.middle_g, r.middle_group_name]
+          'INSERT OR IGNORE INTO ga_group_names (project_id, main_g, middle_g, name) VALUES (?,?,?,?)',
+          [r.project_id, r.main_g, r.middle_g, r.middle_group_name],
         );
       }
     }
@@ -307,7 +341,9 @@ async function init() {
       detail     TEXT DEFAULT ''
     )
   `);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id, timestamp)`);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id, timestamp)`,
+  );
 
   save();
 }
@@ -315,7 +351,7 @@ async function init() {
 // ── Persist ───────────────────────────────────────────────────────────────────
 
 function save() {
-  const data = db.export();          // Uint8Array
+  const data = db.export(); // Uint8Array
   fs.writeFile(DB_PATH, Buffer.from(data), (err) => {
     if (err) console.error('[DB] save error:', err.message);
   });
@@ -325,7 +361,10 @@ function save() {
 let saveTimer = null;
 function scheduleSave(delayMs = 200) {
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { save(); saveTimer = null; }, delayMs);
+  saveTimer = setTimeout(() => {
+    save();
+    saveTimer = null;
+  }, delayMs);
 }
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
@@ -357,8 +396,9 @@ function get(sql, params = []) {
  */
 function run(sql, params = []) {
   db.run(sql, params);
-  const lastInsertRowid = db.exec("SELECT last_insert_rowid() as id")[0]?.values[0][0] ?? null;
-  const changes = db.exec("SELECT changes() as c")[0]?.values[0][0] ?? 0;
+  const lastInsertRowid =
+    db.exec('SELECT last_insert_rowid() as id')[0]?.values[0][0] ?? null;
+  const changes = db.exec('SELECT changes() as c')[0]?.values[0][0] ?? 0;
   return { lastInsertRowid, changes };
 }
 
@@ -388,80 +428,82 @@ function getProjectFull(projectId) {
 
   const devices = all(
     `SELECT id,project_id,individual_address,name,description,comment,installation_hints,manufacturer,model,order_number,serial_number,product_ref,area,line,area_name,line_name,medium,device_type,status,last_modified,last_download,app_number,app_version,parameters,app_ref,param_values,space_id,model_translations,bus_current,width_mm,is_power_supply,is_coupler,is_rail_mounted,floor_x,floor_y FROM devices WHERE project_id=? ORDER BY area, line, CAST(REPLACE(individual_address, area||'.'||line||'.', '') AS INTEGER)`,
-    [projectId]
+    [projectId],
   );
   const gas = all(
     'SELECT * FROM group_addresses WHERE project_id=? ORDER BY main_g, middle_g, sub_g',
-    [projectId]
+    [projectId],
   );
-  const comObjects = all(`
+  const comObjects = all(
+    `
     SELECT co.*, d.individual_address as device_address, d.name as device_name
     FROM com_objects co JOIN devices d ON co.device_id=d.id
     WHERE co.project_id=? ORDER BY d.area, d.line, CAST(REPLACE(d.individual_address, d.area||'.'||d.line||'.', '') AS INTEGER), co.object_number
-  `, [projectId]);
-  // Derive device↔GA mappings from com_objects.ga_address (no separate link table)
-  const deviceGAMap = {};
-  const gaDeviceMap = {};
-  for (const co of comObjects) {
-    const da = co.device_address;
-    for (const ga of (co.ga_address || '').split(/\s+/).filter(Boolean)) {
-      if (!deviceGAMap[da]) deviceGAMap[da] = [];
-      if (!deviceGAMap[da].includes(ga)) deviceGAMap[da].push(ga);
-      if (!gaDeviceMap[ga]) gaDeviceMap[ga] = [];
-      if (!gaDeviceMap[ga].includes(da)) gaDeviceMap[ga].push(da);
-    }
-  }
+  `,
+    [projectId],
+  );
+  const { deviceGAMap, gaDeviceMap } = buildGAMaps(comObjects);
 
   // Build group-name lookup from ga_group_names table
   const groupNames = all(
     'SELECT main_g, middle_g, name FROM ga_group_names WHERE project_id=?',
-    [projectId]
+    [projectId],
   );
-  const mainNameMap = {};   // main_g → name
-  const midNameMap = {};    // "main_g/middle_g" → name
+  const mainNameMap = {}; // main_g → name
+  const midNameMap = {}; // "main_g/middle_g" → name
   for (const gn of groupNames) {
     if (gn.middle_g === -1) mainNameMap[gn.main_g] = gn.name;
     else midNameMap[`${gn.main_g}/${gn.middle_g}`] = gn.name;
   }
 
   // Normalise column names for GAs
-  const normGas = gas.map(g => {
-    const main   = g.main_g   ?? g.main   ?? 0;
+  const normGas = gas.map((g) => {
+    const main = g.main_g ?? g.main ?? 0;
     const middle = g.middle_g ?? g.middle ?? 0;
     return {
       ...g,
-      main, middle,
-      sub:    g.sub_g ?? g.sub ?? 0,
-      main_group_name:   mainNameMap[main] || '',
+      main,
+      middle,
+      sub: g.sub_g ?? g.sub ?? 0,
+      main_group_name: mainNameMap[main] || '',
       middle_group_name: midNameMap[`${main}/${middle}`] || '',
       devices: gaDeviceMap[g.address] || [],
     };
   });
 
-  const spaces = all(
-    'SELECT * FROM spaces WHERE project_id=? ORDER BY id',
-    [projectId]
-  );
+  const spaces = all('SELECT * FROM spaces WHERE project_id=? ORDER BY id', [
+    projectId,
+  ]);
 
   const topoRows = all(
     'SELECT * FROM topology WHERE project_id=? ORDER BY area, line',
-    [projectId]
+    [projectId],
   );
   // Build lookup for area/line names
-  const areaNameMap = {};   // area → name
-  const lineNameMap = {};   // "area.line" → { name, medium }
+  const areaNameMap = {}; // area → name
+  const lineNameMap = {}; // "area.line" → { name, medium }
   for (const t of topoRows) {
     if (t.line === null) areaNameMap[t.area] = t.name;
-    else lineNameMap[`${t.area}.${t.line}`] = { name: t.name, medium: t.medium };
+    else
+      lineNameMap[`${t.area}.${t.line}`] = { name: t.name, medium: t.medium };
   }
   // Attach topology names to devices
-  const devicesWithTopo = devices.map(d => ({
+  const devicesWithTopo = devices.map((d) => ({
     ...d,
     area_name: areaNameMap[d.area] || d.area_name || '',
     line_name: lineNameMap[`${d.area}.${d.line}`]?.name || d.line_name || '',
   }));
 
-  return { project, devices: devicesWithTopo, gas: normGas, comObjects, deviceGAMap, gaDeviceMap, spaces, topology: topoRows };
+  return {
+    project,
+    devices: devicesWithTopo,
+    gas: normGas,
+    comObjects,
+    deviceGAMap,
+    gaDeviceMap,
+    spaces,
+    topology: topoRows,
+  };
 }
 
 /**
@@ -476,9 +518,21 @@ function audit(projectId, action, entity, entityId, detail) {
   try {
     db.run(
       'INSERT INTO audit_log (project_id, action, entity, entity_id, detail) VALUES (?,?,?,?,?)',
-      [projectId, action, entity, entityId || '', detail || '']
+      [projectId, action, entity, entityId || '', detail || ''],
     );
-  } catch (_) { /* never let audit logging break the main operation */ }
+  } catch (_) {
+    /* never let audit logging break the main operation */
+  }
 }
 
-module.exports = { init, save, scheduleSave, all, get, run, transaction, getProjectFull, audit };
+module.exports = {
+  init,
+  save,
+  scheduleSave,
+  all,
+  get,
+  run,
+  transaction,
+  getProjectFull,
+  audit,
+};

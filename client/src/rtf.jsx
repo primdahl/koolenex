@@ -29,27 +29,46 @@ export function RtfText({ value, style, className }) {
     }
 
     let cancelled = false;
-    api.rtfToHtml(value).then(result => {
-      if (cancelled) return;
-      cache.set(value, result);
-      setHtml(result);
-    }).catch(() => {
-      if (!cancelled) setHtml(null);
-    });
-    return () => { cancelled = true; };
+    api
+      .rtfToHtml(value)
+      .then((result) => {
+        if (cancelled) return;
+        cache.set(value, result);
+        setHtml(result);
+      })
+      .catch(() => {
+        if (!cancelled) setHtml(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
 
   if (!value) return null;
 
   if (!value.startsWith('{\\rtf')) {
-    return <span style={style} className={className}>{value}</span>;
+    return (
+      <span style={style} className={className}>
+        {value}
+      </span>
+    );
   }
 
   if (html === null) {
-    return <span style={{ ...style, opacity: 0.5 }} className={className}>Loading…</span>;
+    return (
+      <span style={{ ...style, opacity: 0.5 }} className={className}>
+        Loading…
+      </span>
+    );
   }
 
-  return <span style={style} className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  return (
+    <span
+      style={style}
+      className={className}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
 /**
@@ -88,13 +107,18 @@ export function EditableRtfField({ label, value, onSave, C }) {
     try {
       await onSave(draft);
       setEditing(false);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
     setSaving(false);
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') setEditing(false);
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSave();
+    }
   };
 
   useEffect(() => {
@@ -103,26 +127,91 @@ export function EditableRtfField({ label, value, onSave, C }) {
 
   return (
     <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.08em', marginBottom: 4 }}>{label}</div>
+      <div
+        style={{
+          fontSize: 10,
+          color: C.dim,
+          letterSpacing: '0.08em',
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </div>
       {editing ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <textarea ref={ref} value={draft} onChange={e => setDraft(e.target.value)}
-            onKeyDown={handleKeyDown} rows={3}
-            style={{ background: C.inputBg, border: `1px solid ${C.accent}`, borderRadius: 4, padding: '8px 12px', color: C.text, fontSize: 11, fontFamily: 'inherit', resize: 'vertical', minHeight: 40 }} />
+          <textarea
+            ref={ref}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={3}
+            style={{
+              background: C.inputBg,
+              border: `1px solid ${C.accent}`,
+              borderRadius: 4,
+              padding: '8px 12px',
+              color: C.text,
+              fontSize: 11,
+              fontFamily: 'inherit',
+              resize: 'vertical',
+              minHeight: 40,
+            }}
+          />
           <div style={{ display: 'flex', gap: 6 }}>
-            <span onClick={!saving ? handleSave : undefined}
-              style={{ fontSize: 9, padding: '2px 8px', borderRadius: 10, background: `${C.green}18`, color: C.green, border: `1px solid ${C.green}30`, cursor: saving ? 'default' : 'pointer', letterSpacing: '0.06em' }}
-              className="bg">{saving ? 'Saving…' : 'Save'}</span>
-            <span onClick={() => setEditing(false)}
-              style={{ fontSize: 9, padding: '2px 8px', borderRadius: 10, background: `${C.dim}15`, color: C.dim, border: `1px solid ${C.dim}30`, cursor: 'pointer', letterSpacing: '0.06em' }}
-              className="bg">Cancel</span>
+            <span
+              onClick={!saving ? handleSave : undefined}
+              style={{
+                fontSize: 9,
+                padding: '2px 8px',
+                borderRadius: 10,
+                background: `${C.green}18`,
+                color: C.green,
+                border: `1px solid ${C.green}30`,
+                cursor: saving ? 'default' : 'pointer',
+                letterSpacing: '0.06em',
+              }}
+              className="bg"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </span>
+            <span
+              onClick={() => setEditing(false)}
+              style={{
+                fontSize: 9,
+                padding: '2px 8px',
+                borderRadius: 10,
+                background: `${C.dim}15`,
+                color: C.dim,
+                border: `1px solid ${C.dim}30`,
+                cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}
+              className="bg"
+            >
+              Cancel
+            </span>
           </div>
         </div>
       ) : (
-        <div onClick={onSave ? startEdit : undefined}
-          style={{ fontSize: 11, color: value ? C.muted : C.dim, padding: '8px 12px', background: C.surface, borderRadius: 4, border: `1px solid ${C.border}`, minHeight: 20, cursor: onSave ? 'pointer' : 'default' }}
-          title={onSave ? 'Click to edit' : undefined}>
-          {value ? <RtfText value={value} /> : <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Empty</span>}
+        <div
+          onClick={onSave ? startEdit : undefined}
+          style={{
+            fontSize: 11,
+            color: value ? C.muted : C.dim,
+            padding: '8px 12px',
+            background: C.surface,
+            borderRadius: 4,
+            border: `1px solid ${C.border}`,
+            minHeight: 20,
+            cursor: onSave ? 'pointer' : 'default',
+          }}
+          title={onSave ? 'Click to edit' : undefined}
+        >
+          {value ? (
+            <RtfText value={value} />
+          ) : (
+            <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Empty</span>
+          )}
         </div>
       )}
     </div>

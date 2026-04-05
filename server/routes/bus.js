@@ -1,38 +1,44 @@
 'use strict';
 const express = require('express');
-const path    = require('path');
-const fs      = require('fs');
-const db      = require('../db');
+const path = require('path');
+const fs = require('fs');
+const db = require('../db');
 const { APPS_DIR, getDptInfo } = require('./shared');
-const { buildGATable, buildAssocTable, resolveParamSegment, buildParamMem } = require('./knx-tables');
+const {
+  buildGATable,
+  buildAssocTable,
+  resolveParamSegment,
+  buildParamMem,
+} = require('./knx-tables');
 
 let bus = null;
 const router = express.Router();
 
 // ── Demo mode address remapping ──────────────────────────────────────────────
 let _demoDevMap = null; // real IA -> demo IA
-let _demoGaMap  = null; // real GA -> demo GA
-let _demoDevMapRev = null;
-let _demoGaMapRev  = null;
+let _demoGaMap = null; // real GA -> demo GA
+let _demoGaMapRev = null;
 
 function rebuildDemoMap() {
   const mapRow = db.get("SELECT value FROM settings WHERE key='demo_addr_map'");
   if (!mapRow || !mapRow.value) {
     _demoDevMap = null;
-    _demoGaMap  = null;
+    _demoGaMap = null;
     rebuildReverseMaps();
     return;
   }
   try {
     const map = JSON.parse(mapRow.value);
     _demoDevMap = map.devices || null;
-    _demoGaMap  = map.gas || null;
-    console.log(`[DEMO] Address map loaded: ${Object.keys(_demoDevMap||{}).length} devices, ${Object.keys(_demoGaMap||{}).length} GAs`);
+    _demoGaMap = map.gas || null;
+    console.log(
+      `[DEMO] Address map loaded: ${Object.keys(_demoDevMap || {}).length} devices, ${Object.keys(_demoGaMap || {}).length} GAs`,
+    );
     rebuildReverseMaps();
   } catch (e) {
     console.error('[DEMO] Failed to parse demo_addr_map:', e.message);
     _demoDevMap = null;
-    _demoGaMap  = null;
+    _demoGaMap = null;
     rebuildReverseMaps();
   }
 }
@@ -40,7 +46,7 @@ function rebuildDemoMap() {
 function isDemoProjectActive() {
   const pid = bus.projectId;
   if (!pid) return false;
-  const proj = db.get("SELECT name FROM projects WHERE id=?", [+pid]);
+  const proj = db.get('SELECT name FROM projects WHERE id=?', [+pid]);
   return proj && proj.name.includes('Demo');
 }
 
@@ -54,8 +60,9 @@ function remapTelegram(tg) {
 }
 
 function rebuildReverseMaps() {
-  _demoDevMapRev = _demoDevMap ? Object.fromEntries(Object.entries(_demoDevMap).map(([k,v]) => [v,k])) : null;
-  _demoGaMapRev  = _demoGaMap  ? Object.fromEntries(Object.entries(_demoGaMap).map(([k,v]) => [v,k]))  : null;
+  _demoGaMapRev = _demoGaMap
+    ? Object.fromEntries(Object.entries(_demoGaMap).map(([k, v]) => [v, k]))
+    : null;
 }
 
 /** Map a demo GA back to the real bus GA for sending */
@@ -69,7 +76,10 @@ function normalizeDptKey(dpt) {
   if (!dpt) return null;
   const m = dpt.match(/^DPS?T-(\d+)-(\d+)$/i);
   if (m) return `${m[1]}.${m[2].padStart(3, '0')}`;
-  if (dpt.includes('.')) { const [a, b] = dpt.split('.'); return `${a}.${b.padStart(3, '0')}`; }
+  if (dpt.includes('.')) {
+    const [a, b] = dpt.split('.');
+    return `${a}.${b.padStart(3, '0')}`;
+  }
   return null;
 }
 
@@ -90,13 +100,17 @@ function decodeRawValue(rawHex, dptKey, info) {
   if (rawBuf.length === 1) {
     const v = rawBuf[0];
     const coeff = info?.coefficient;
-    return coeff != null ? (v * coeff).toFixed(1).replace(/\.0$/, '') : String(v);
+    return coeff != null
+      ? (v * coeff).toFixed(1).replace(/\.0$/, '')
+      : String(v);
   }
   if (rawBuf.length === 2) {
     if (major === 9) {
       // DPT 9: KNX 2-byte float
       const raw = rawBuf.readUInt16BE(0);
-      const sign = (raw >> 15) & 1, exp = (raw >> 11) & 0xF, mant = raw & 0x7FF;
+      const sign = (raw >> 15) & 1,
+        exp = (raw >> 11) & 0xf,
+        mant = raw & 0x7ff;
       const signedMant = sign ? mant - 2048 : mant;
       return (0.01 * signedMant * Math.pow(2, exp)).toFixed(2);
     }
@@ -104,13 +118,17 @@ function decodeRawValue(rawHex, dptKey, info) {
       // DPT 7: 16-bit unsigned integer
       const v = rawBuf.readUInt16BE(0);
       const coeff = info?.coefficient;
-      return coeff != null ? (v * coeff).toFixed(1).replace(/\.0$/, '') : String(v);
+      return coeff != null
+        ? (v * coeff).toFixed(1).replace(/\.0$/, '')
+        : String(v);
     }
     if (major === 8) {
       // DPT 8: 16-bit signed integer
       const v = rawBuf.readInt16BE(0);
       const coeff = info?.coefficient;
-      return coeff != null ? (v * coeff).toFixed(1).replace(/\.0$/, '') : String(v);
+      return coeff != null
+        ? (v * coeff).toFixed(1).replace(/\.0$/, '')
+        : String(v);
     }
   }
   if (rawBuf.length === 4 && major === 14) {
@@ -123,8 +141,10 @@ function decodeRawValue(rawHex, dptKey, info) {
 function refineDecode(tg) {
   if (!tg.projectId || !tg.dst?.includes('/') || !tg.raw_value) return tg;
 
-  const ga = db.get('SELECT dpt FROM group_addresses WHERE project_id=? AND address=?',
-    [tg.projectId, tg.dst]);
+  const ga = db.get(
+    'SELECT dpt FROM group_addresses WHERE project_id=? AND address=?',
+    [tg.projectId, tg.dst],
+  );
   if (!ga?.dpt) return tg;
 
   const key = normalizeDptKey(ga.dpt);
@@ -138,14 +158,28 @@ function refineDecode(tg) {
 function wireBusEvents() {
   if (!bus) return;
   bus.setRemapper((tg) => refineDecode(remapTelegram(tg)));
-  setTimeout(() => { try { rebuildDemoMap(); } catch(_) {} }, 0);
+  setTimeout(() => {
+    try {
+      rebuildDemoMap();
+    } catch (_) {}
+  }, 0);
   bus.on('telegram', (tg) => {
     if (!tg.projectId) return;
     try {
-      db.run('INSERT INTO bus_telegrams (project_id,src,dst,type,raw_value,decoded,priority) VALUES (?,?,?,?,?,?,?)',
-        [tg.projectId, tg.src, tg.dst, tg.type, tg.raw_value, tg.decoded, tg.priority||'low']);
-    db.scheduleSave(500);
-  } catch(_) {}
+      db.run(
+        'INSERT INTO bus_telegrams (project_id,src,dst,type,raw_value,decoded,priority) VALUES (?,?,?,?,?,?,?)',
+        [
+          tg.projectId,
+          tg.src,
+          tg.dst,
+          tg.type,
+          tg.raw_value,
+          tg.decoded,
+          tg.priority || 'low',
+        ],
+      );
+      db.scheduleSave(500);
+    } catch (_) {}
   });
 }
 
@@ -156,9 +190,11 @@ router.post('/bus/connect', async (req, res) => {
   const { host, port, projectId } = req.body;
   if (!host) return res.status(400).json({ error: 'host required' });
   try {
-    const result = await bus.connect(host, parseInt(port)||3671, projectId);
+    const result = await bus.connect(host, parseInt(port) || 3671, projectId);
     db.run("INSERT OR REPLACE INTO settings VALUES ('knxip_host',?)", [host]);
-    db.run("INSERT OR REPLACE INTO settings VALUES ('knxip_port',?)", [String(port||3671)]);
+    db.run("INSERT OR REPLACE INTO settings VALUES ('knxip_port',?)", [
+      String(port || 3671),
+    ]);
     db.scheduleSave();
     res.json({ ok: true, ...result });
   } catch (err) {
@@ -186,7 +222,8 @@ router.get('/bus/usb-devices/all', (req, res) => {
 
 router.post('/bus/connect-usb', async (req, res) => {
   const { devicePath, projectId } = req.body;
-  if (!devicePath) return res.status(400).json({ error: 'devicePath required' });
+  if (!devicePath)
+    return res.status(400).json({ error: 'devicePath required' });
   try {
     const result = await bus.connectUsb(devicePath, projectId);
     res.json({ ok: true, type: 'usb', ...result });
@@ -213,11 +250,28 @@ router.post('/bus/write', (req, res) => {
     const busGa = unremap(ga); // demo GA -> real bus GA
     const result = bus.write(busGa, value, dpt);
     if (projectId) {
-      db.run('INSERT INTO bus_telegrams (project_id,src,dst,type,raw_value,decoded,priority) VALUES (?,?,?,?,?,?,?)',
-        [projectId, 'local', ga, 'GroupValue_Write', String(value), String(value), 'low']);
+      db.run(
+        'INSERT INTO bus_telegrams (project_id,src,dst,type,raw_value,decoded,priority) VALUES (?,?,?,?,?,?,?)',
+        [
+          projectId,
+          'local',
+          ga,
+          'GroupValue_Write',
+          String(value),
+          String(value),
+          'low',
+        ],
+      );
       db.scheduleSave();
       bus.broadcast('knx:telegram', {
-        telegram: { timestamp: new Date().toISOString(), src:'local', dst:ga, type:'GroupValue_Write', raw_value:String(value), decoded:String(value) },
+        telegram: {
+          timestamp: new Date().toISOString(),
+          src: 'local',
+          dst: ga,
+          type: 'GroupValue_Write',
+          raw_value: String(value),
+          decoded: String(value),
+        },
         projectId,
       });
     }
@@ -228,8 +282,11 @@ router.post('/bus/write', (req, res) => {
 });
 
 router.post('/bus/read', async (req, res) => {
-  try { res.json(await bus.read(req.body.ga)); }
-  catch (err) { res.status(502).json({ error: err.message }); }
+  try {
+    res.json(await bus.read(req.body.ga));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 // Probe device reachability
@@ -239,19 +296,24 @@ router.post('/bus/ping', async (req, res) => {
     const result = await bus.ping(gaAddresses, deviceAddress || null);
     res.json(result);
   } catch (err) {
-    res.status(err.message.includes('Not connected') ? 409 : 502).json({ error: err.message });
+    res
+      .status(err.message.includes('Not connected') ? 409 : 502)
+      .json({ error: err.message });
   }
 });
 
 // Flash programming LED on device
 router.post('/bus/identify', async (req, res) => {
   const { deviceAddress } = req.body;
-  if (!deviceAddress) return res.status(400).json({ error: 'deviceAddress required' });
+  if (!deviceAddress)
+    return res.status(400).json({ error: 'deviceAddress required' });
   try {
     await bus.identify(deviceAddress);
     res.json({ ok: true });
   } catch (err) {
-    res.status(err.message.includes('Not connected') ? 409 : 502).json({ error: err.message });
+    res
+      .status(err.message.includes('Not connected') ? 409 : 502)
+      .json({ error: err.message });
   }
 });
 
@@ -262,15 +324,22 @@ router.post('/bus/scan', (req, res) => {
   if (!bus.connected) return res.status(409).json({ error: 'Not connected' });
   if (_activeScan) bus.abortScan();
   res.json({ ok: true });
-  _activeScan = bus.scan(parseInt(area), parseInt(line), parseInt(timeout), prog => {
-    bus.broadcast('scan:progress', prog);
-  }).then(results => {
-    bus.broadcast('scan:done', { results, area: parseInt(area), line: parseInt(line) });
-    _activeScan = null;
-  }).catch(err => {
-    bus.broadcast('scan:error', { error: err.message });
-    _activeScan = null;
-  });
+  _activeScan = bus
+    .scan(parseInt(area), parseInt(line), parseInt(timeout), (prog) => {
+      bus.broadcast('scan:progress', prog);
+    })
+    .then((results) => {
+      bus.broadcast('scan:done', {
+        results,
+        area: parseInt(area),
+        line: parseInt(line),
+      });
+      _activeScan = null;
+    })
+    .catch((err) => {
+      bus.broadcast('scan:error', { error: err.message });
+      _activeScan = null;
+    });
 });
 
 router.post('/bus/scan/abort', (req, res) => {
@@ -282,7 +351,8 @@ router.post('/bus/scan/abort', (req, res) => {
 // ── Device info ──────────────────────────────────────────────────────────────
 router.post('/bus/device-info', async (req, res) => {
   const { deviceAddress } = req.body;
-  if (!deviceAddress) return res.status(400).json({ error: 'deviceAddress required' });
+  if (!deviceAddress)
+    return res.status(400).json({ error: 'deviceAddress required' });
   if (!bus.connected) return res.status(409).json({ error: 'Not connected' });
   try {
     const info = await bus.readDeviceInfo(deviceAddress);
@@ -298,7 +368,8 @@ router.post('/bus/device-info', async (req, res) => {
 router.post('/bus/program-ia', async (req, res) => {
   const { newAddr } = req.body;
   if (!newAddr) return res.status(400).json({ error: 'newAddr required' });
-  if (!bus.connected) return res.status(409).json({ error: 'Bus not connected' });
+  if (!bus.connected)
+    return res.status(409).json({ error: 'Bus not connected' });
   try {
     const result = await bus.programIA(newAddr);
     res.json(result);
@@ -310,32 +381,68 @@ router.post('/bus/program-ia', async (req, res) => {
 // Full application download for a device
 router.post('/bus/program-device', async (req, res) => {
   const { deviceAddress, projectId, deviceId } = req.body;
-  if (!deviceAddress) return res.status(400).json({ error: 'deviceAddress required' });
-  if (!bus.connected) return res.status(409).json({ error: 'Bus not connected' });
+  if (!deviceAddress)
+    return res.status(400).json({ error: 'deviceAddress required' });
+  if (!bus.connected)
+    return res.status(409).json({ error: 'Bus not connected' });
 
   // Load device data
   const dev = deviceId
     ? db.get('SELECT * FROM devices WHERE id=?', [+deviceId])
-    : db.get('SELECT * FROM devices WHERE individual_address=? AND project_id=?', [deviceAddress, +projectId]);
+    : db.get(
+        'SELECT * FROM devices WHERE individual_address=? AND project_id=?',
+        [deviceAddress, +projectId],
+      );
   if (!dev) return res.status(404).json({ error: 'Device not found' });
 
   // Load app model (load procedures)
-  if (!dev.app_ref) return res.status(400).json({ error: 'no_app', message: 'Device has no application program reference. Re-import the project.' });
-  const safe = dev.app_ref.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  if (!dev.app_ref)
+    return res
+      .status(400)
+      .json({
+        error: 'no_app',
+        message:
+          'Device has no application program reference. Re-import the project.',
+      });
+  const safe = dev.app_ref.replace(/[^a-zA-Z0-9_-]/g, '_');
   const modelPath = path.join(APPS_DIR, safe + '.json');
-  if (!fs.existsSync(modelPath)) return res.status(400).json({ error: 'no_model', message: 'App model not found. Re-import the project.' });
+  if (!fs.existsSync(modelPath))
+    return res
+      .status(400)
+      .json({
+        error: 'no_model',
+        message: 'App model not found. Re-import the project.',
+      });
   let model;
-  try { model = JSON.parse(fs.readFileSync(modelPath, 'utf8')); } catch { return res.status(500).json({ error: 'Failed to read app model' }); }
-  if (!model.loadProcedures?.length) return res.status(400).json({ error: 'no_ldctrl', message: 'No load procedures found. Re-import the project.' });
+  try {
+    model = JSON.parse(fs.readFileSync(modelPath, 'utf8'));
+  } catch {
+    return res.status(500).json({ error: 'Failed to read app model' });
+  }
+  if (!model.loadProcedures?.length)
+    return res
+      .status(400)
+      .json({
+        error: 'no_ldctrl',
+        message: 'No load procedures found. Re-import the project.',
+      });
 
   // Build GA table from project data
-  const pid = dev.project_id;
-  const coRows = db.all('SELECT * FROM com_objects WHERE device_id=? ORDER BY object_number', [dev.id]);
+  const coRows = db.all(
+    'SELECT * FROM com_objects WHERE device_id=? ORDER BY object_number',
+    [dev.id],
+  );
   const gaAddrsUsed = new Set();
-  for (const co of coRows) for (const a of (co.ga_address || '').split(/\s+/).filter(Boolean)) gaAddrsUsed.add(a);
-  const gaLinks = gaAddrsUsed.size > 0
-    ? db.all(`SELECT address, main_g, middle_g, sub_g FROM group_addresses WHERE project_id=? AND address IN (${[...gaAddrsUsed].map(() => '?').join(',')}) ORDER BY main_g, middle_g, sub_g`, [dev.project_id, ...gaAddrsUsed])
-    : [];
+  for (const co of coRows)
+    for (const a of (co.ga_address || '').split(/\s+/).filter(Boolean))
+      gaAddrsUsed.add(a);
+  const gaLinks =
+    gaAddrsUsed.size > 0
+      ? db.all(
+          `SELECT address, main_g, middle_g, sub_g FROM group_addresses WHERE project_id=? AND address IN (${[...gaAddrsUsed].map(() => '?').join(',')}) ORDER BY main_g, middle_g, sub_g`,
+          [dev.project_id, ...gaAddrsUsed],
+        )
+      : [];
 
   const gaTable = buildGATable(gaLinks);
   const assocTable = buildAssocTable(coRows, gaLinks);
@@ -345,24 +452,42 @@ router.post('/bus/program-device', async (req, res) => {
   let paramMem = null;
   if (paramSize > 0 && model.paramMemLayout) {
     let currentValues = {};
-    try { currentValues = JSON.parse(dev.param_values || '{}'); } catch (_) {}
-    paramMem = buildParamMem(paramSize, model.paramMemLayout, currentValues, paramFill, relSegHex, model.dynTree, model.params);
+    try {
+      currentValues = JSON.parse(dev.param_values || '{}');
+    } catch (_) {}
+    paramMem = buildParamMem(
+      paramSize,
+      model.paramMemLayout,
+      currentValues,
+      paramFill,
+      relSegHex,
+      model.dynTree,
+      model.params,
+    );
   } else if (paramSize > 0) {
-    paramMem = Buffer.alloc(paramSize, 0xFF);
+    paramMem = Buffer.alloc(paramSize, 0xff);
   }
 
   // Convert step data from hex strings back to Buffers
-  const steps = model.loadProcedures.map(s => ({
+  const steps = model.loadProcedures.map((s) => ({
     ...s,
     data: s.data ? Buffer.from(s.data, 'hex') : null,
   }));
 
   // Stream progress via WebSocket
-  const onProgress = (p) => bus.broadcast('program:progress', { deviceAddress, ...p });
+  const onProgress = (p) =>
+    bus.broadcast('program:progress', { deviceAddress, ...p });
   onProgress({ msg: `Starting download to ${deviceAddress}`, pct: 0 });
 
   try {
-    await bus.downloadDevice(deviceAddress, steps, gaTable, assocTable, paramMem, onProgress);
+    await bus.downloadDevice(
+      deviceAddress,
+      steps,
+      gaTable,
+      assocTable,
+      paramMem,
+      onProgress,
+    );
     db.run('UPDATE devices SET status=? WHERE id=?', ['programmed', dev.id]);
     db.scheduleSave();
     res.json({ ok: true, deviceAddress });
@@ -376,4 +501,7 @@ module.exports = router;
 module.exports.normalizeDptKey = normalizeDptKey;
 module.exports.decodeRawValue = decodeRawValue;
 module.exports.rebuildDemoMap = rebuildDemoMap;
-module.exports.setBus = (b) => { bus = b; wireBusEvents(); };
+module.exports.setBus = (b) => {
+  bus = b;
+  wireBusEvents();
+};
