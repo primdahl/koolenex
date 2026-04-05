@@ -91,8 +91,52 @@ function encodeDpt(value, dpt) {
           : 0,
       ]);
     }
+    case '2': {
+      // DPT 2: 1 byte, 2 bits — control + value
+      if (typeof value === 'object' && value !== null) {
+        const c = value.control ? 1 : 0;
+        const v = value.value ? 1 : 0;
+        return Buffer.from([(c << 1) | v]);
+      }
+      return Buffer.from([parseInt(value) & 0x03]);
+    }
+    case '3': {
+      // DPT 3: 1 byte, 4 bits — control + 3-bit stepcode
+      if (typeof value === 'object' && value !== null) {
+        const c = value.control ? 1 : 0;
+        const s = parseInt(value.stepcode) & 0x07;
+        return Buffer.from([(c << 3) | s]);
+      }
+      return Buffer.from([parseInt(value) & 0x0f]);
+    }
+    case '4': {
+      // DPT 4: 1 byte — ASCII/8859-1 character
+      const ch =
+        typeof value === 'string'
+          ? value.charCodeAt(0) || 0
+          : parseInt(value) & 0xff;
+      return Buffer.from([ch & 0xff]);
+    }
     case '5':
       return Buffer.from([Math.min(255, Math.max(0, parseInt(value)))]);
+    case '6': {
+      // DPT 6: 1 byte — signed int8 (-128..127)
+      const b = Buffer.alloc(1);
+      b.writeInt8(Math.min(127, Math.max(-128, parseInt(value))));
+      return b;
+    }
+    case '7': {
+      // DPT 7: 2 bytes — 16-bit unsigned
+      const b = Buffer.alloc(2);
+      b.writeUInt16BE(Math.min(65535, Math.max(0, parseInt(value))));
+      return b;
+    }
+    case '8': {
+      // DPT 8: 2 bytes — 16-bit signed
+      const b = Buffer.alloc(2);
+      b.writeInt16BE(Math.min(32767, Math.max(-32768, parseInt(value))));
+      return b;
+    }
     case '9': {
       const v = parseFloat(value);
       let mant = Math.round(v * 100),
@@ -108,9 +152,197 @@ function encodeDpt(value, dpt) {
       b.writeUInt16BE(raw & 0xffff);
       return b;
     }
+    case '10': {
+      // DPT 10: 3 bytes — time of day
+      const DAYS = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+      let day = 0,
+        hour = 0,
+        min = 0,
+        sec = 0;
+      if (typeof value === 'object' && value !== null) {
+        day = parseInt(value.day) || 0;
+        hour = parseInt(value.hour) || 0;
+        min = parseInt(value.min) || 0;
+        sec = parseInt(value.sec) || 0;
+      } else if (typeof value === 'string') {
+        const m = value.match(/^(\w+)\s+(\d+):(\d+):(\d+)$/);
+        if (m) {
+          day = DAYS[m[1].toLowerCase()] || 0;
+          hour = parseInt(m[2]);
+          min = parseInt(m[3]);
+          sec = parseInt(m[4]);
+        }
+      }
+      return Buffer.from([
+        ((day & 0x07) << 5) | (hour & 0x1f),
+        min & 0x3f,
+        sec & 0x3f,
+      ]);
+    }
+    case '11': {
+      // DPT 11: 3 bytes — date
+      let day = 1,
+        month = 1,
+        year = 2000;
+      if (typeof value === 'object' && value !== null) {
+        day = parseInt(value.day) || 1;
+        month = parseInt(value.month) || 1;
+        year = parseInt(value.year) || 2000;
+      } else if (typeof value === 'string') {
+        const parts = value.split('-');
+        if (parts.length === 3) {
+          year = parseInt(parts[0]);
+          month = parseInt(parts[1]);
+          day = parseInt(parts[2]);
+        }
+      }
+      const y =
+        year >= 1990 && year < 2000
+          ? year - 1900
+          : year >= 2000
+            ? year - 2000
+            : year;
+      return Buffer.from([day & 0x1f, month & 0x0f, y & 0x7f]);
+    }
+    case '12': {
+      // DPT 12: 4 bytes — 32-bit unsigned
+      const b = Buffer.alloc(4);
+      b.writeUInt32BE(Math.max(0, parseInt(value)) >>> 0);
+      return b;
+    }
+    case '13': {
+      // DPT 13: 4 bytes — 32-bit signed
+      const b = Buffer.alloc(4);
+      b.writeInt32BE(parseInt(value) | 0);
+      return b;
+    }
     case '14': {
       const b = Buffer.alloc(4);
       b.writeFloatBE(parseFloat(value));
+      return b;
+    }
+    case '16': {
+      // DPT 16: 14 bytes — fixed-length string
+      const b = Buffer.alloc(14, 0x00);
+      const s = typeof value === 'string' ? value : String(value);
+      for (let i = 0; i < Math.min(s.length, 14); i++) {
+        b[i] = s.charCodeAt(i) & 0xff;
+      }
+      return b;
+    }
+    case '17': {
+      // DPT 17: 1 byte — scene number (0-63)
+      return Buffer.from([parseInt(value) & 0x3f]);
+    }
+    case '18': {
+      // DPT 18: 1 byte — scene control
+      if (typeof value === 'object' && value !== null) {
+        const c = value.control ? 1 : 0;
+        const s = parseInt(value.scene) & 0x3f;
+        return Buffer.from([(c << 7) | s]);
+      }
+      return Buffer.from([parseInt(value) & 0xff]);
+    }
+    case '19': {
+      // DPT 19: 8 bytes — date/time
+      let dt;
+      if (value instanceof Date) {
+        dt = value;
+      } else if (typeof value === 'string') {
+        dt = new Date(value);
+      } else {
+        dt = new Date();
+      }
+      const dow = dt.getDay() === 0 ? 7 : dt.getDay(); // 1=Mon..7=Sun
+      const b = Buffer.alloc(8, 0x00);
+      b[0] = dt.getFullYear() - 1900;
+      b[1] = (dt.getMonth() + 1) & 0x0f;
+      b[2] = ((dow & 0x07) << 5) | (dt.getDate() & 0x1f);
+      b[3] = dt.getHours() & 0x1f;
+      b[4] = dt.getMinutes() & 0x3f;
+      b[5] = dt.getSeconds() & 0x3f;
+      // b[6], b[7] = status flags, left as 0
+      return b;
+    }
+    case '20': {
+      // DPT 20: 1 byte — 8-bit enum
+      return Buffer.from([parseInt(value) & 0xff]);
+    }
+    case '232': {
+      // DPT 232: 3 bytes — RGB colour
+      if (typeof value === 'object' && value !== null) {
+        return Buffer.from([
+          parseInt(value.r) & 0xff,
+          parseInt(value.g) & 0xff,
+          parseInt(value.b) & 0xff,
+        ]);
+      }
+      if (typeof value === 'string') {
+        if (value.startsWith('#') && value.length >= 7) {
+          return Buffer.from([
+            parseInt(value.slice(1, 3), 16),
+            parseInt(value.slice(3, 5), 16),
+            parseInt(value.slice(5, 7), 16),
+          ]);
+        }
+        const parts = value.split(',').map((s) => parseInt(s.trim()));
+        if (parts.length >= 3) {
+          return Buffer.from([
+            parts[0] & 0xff,
+            parts[1] & 0xff,
+            parts[2] & 0xff,
+          ]);
+        }
+      }
+      return Buffer.from([0, 0, 0]);
+    }
+    case '242': {
+      // DPT 242: 6 bytes — xyY colour
+      const b = Buffer.alloc(6, 0x00);
+      if (typeof value === 'object' && value !== null) {
+        const xVal = Math.round(
+          Math.min(1, Math.max(0, parseFloat(value.x) || 0)) * 65535,
+        );
+        const yVal = Math.round(
+          Math.min(1, Math.max(0, parseFloat(value.y) || 0)) * 65535,
+        );
+        const bri = Math.min(255, Math.max(0, parseInt(value.brightness) || 0));
+        b.writeUInt16BE(xVal, 0);
+        b.writeUInt16BE(yVal, 2);
+        b[4] = bri;
+        let flags = 0;
+        if (value.x != null || value.y != null) flags |= 0x02; // colour valid
+        if (value.brightness != null) flags |= 0x01; // brightness valid
+        b[5] = flags;
+      }
+      return b;
+    }
+    case '251': {
+      // DPT 251: 6 bytes — RGBW colour
+      const b = Buffer.alloc(6, 0x00);
+      if (typeof value === 'object' && value !== null) {
+        b[0] = parseInt(value.r) & 0xff;
+        b[1] = parseInt(value.g) & 0xff;
+        b[2] = parseInt(value.b) & 0xff;
+        b[3] = parseInt(value.w) & 0xff;
+        // b[4] = reserved
+        let flags = 0;
+        if (value.r != null) flags |= 0x08;
+        if (value.g != null) flags |= 0x04;
+        if (value.b != null) flags |= 0x02;
+        if (value.w != null) flags |= 0x01;
+        b[5] = flags;
+      } else if (
+        typeof value === 'string' &&
+        value.startsWith('#') &&
+        value.length >= 9
+      ) {
+        b[0] = parseInt(value.slice(1, 3), 16);
+        b[1] = parseInt(value.slice(3, 5), 16);
+        b[2] = parseInt(value.slice(5, 7), 16);
+        b[3] = parseInt(value.slice(7, 9), 16);
+        b[5] = 0x0f; // all valid
+      }
       return b;
     }
     default:
@@ -132,6 +364,11 @@ function decodeDptBuffer(buf) {
     const signedMant = sign ? mant - 2048 : mant;
     const v = 0.01 * signedMant * Math.pow(2, exp);
     return v.toFixed(2);
+  }
+  if (buf.length === 3) {
+    // Could be DPT 10 (time), DPT 11 (date), or DPT 232 (RGB) —
+    // without DPT context, show as RGB hex
+    return '#' + buf.toString('hex');
   }
   return buf.toString('hex');
 }

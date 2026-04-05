@@ -99,6 +99,36 @@ function decodeRawValue(rawHex, dptKey, info) {
 
   if (rawBuf.length === 1) {
     const v = rawBuf[0];
+    if (major === 2) {
+      // DPT 2: control + value (2 bits)
+      const c = (v >> 1) & 1;
+      const val = v & 1;
+      return `c=${c} v=${val}`;
+    }
+    if (major === 3) {
+      // DPT 3: control + stepcode (4 bits)
+      const c = (v >> 3) & 1;
+      const stepcode = v & 0x07;
+      return `c=${c} step=${stepcode}`;
+    }
+    if (major === 4) {
+      // DPT 4: ASCII/8859-1 character
+      return String.fromCharCode(v);
+    }
+    if (major === 6) {
+      // DPT 6: signed int8
+      return String(rawBuf.readInt8(0));
+    }
+    if (major === 17) {
+      // DPT 17: scene number (0-63)
+      return String(v & 0x3f);
+    }
+    if (major === 18) {
+      // DPT 18: scene control
+      const ctrl = (v >> 7) & 1;
+      const scene = v & 0x3f;
+      return ctrl ? `learn scene ${scene}` : `activate scene ${scene}`;
+    }
     const coeff = info?.coefficient;
     return coeff != null
       ? (v * coeff).toFixed(1).replace(/\.0$/, '')
@@ -131,9 +161,88 @@ function decodeRawValue(rawHex, dptKey, info) {
         : String(v);
     }
   }
-  if (rawBuf.length === 4 && major === 14) {
-    // DPT 14: 32-bit IEEE 754 float
-    return rawBuf.readFloatBE(0).toFixed(2);
+  if (rawBuf.length === 3) {
+    if (major === 10) {
+      // DPT 10: time of day
+      const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const day = (rawBuf[0] >> 5) & 0x07;
+      const hour = rawBuf[0] & 0x1f;
+      const min = rawBuf[1] & 0x3f;
+      const sec = rawBuf[2] & 0x3f;
+      const dayStr = DAYS[day] || '';
+      const timeStr = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+      return dayStr ? `${dayStr} ${timeStr}` : timeStr;
+    }
+    if (major === 11) {
+      // DPT 11: date
+      const day = rawBuf[0] & 0x1f;
+      const month = rawBuf[1] & 0x0f;
+      const yr = rawBuf[2] & 0x7f;
+      const year = yr >= 90 ? 1900 + yr : 2000 + yr;
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    if (major === 232) {
+      // DPT 232: RGB colour
+      return '#' + rawBuf.toString('hex');
+    }
+  }
+  if (rawBuf.length === 4) {
+    if (major === 14) {
+      // DPT 14: 32-bit IEEE 754 float
+      return rawBuf.readFloatBE(0).toFixed(2);
+    }
+    if (major === 12) {
+      // DPT 12: 32-bit unsigned
+      const v = rawBuf.readUInt32BE(0);
+      const coeff = info?.coefficient;
+      return coeff != null
+        ? (v * coeff).toFixed(1).replace(/\.0$/, '')
+        : String(v);
+    }
+    if (major === 13) {
+      // DPT 13: 32-bit signed
+      const v = rawBuf.readInt32BE(0);
+      const coeff = info?.coefficient;
+      return coeff != null
+        ? (v * coeff).toFixed(1).replace(/\.0$/, '')
+        : String(v);
+    }
+  }
+  if (rawBuf.length === 6) {
+    if (major === 242) {
+      // DPT 242: xyY colour
+      const xRaw = rawBuf.readUInt16BE(0);
+      const yRaw = rawBuf.readUInt16BE(2);
+      const bri = rawBuf[4];
+      const x = (xRaw / 65535).toFixed(3);
+      const y = (yRaw / 65535).toFixed(3);
+      const briPct = Math.round((bri / 255) * 100);
+      return `xyY(${x}, ${y}, ${briPct}%)`;
+    }
+    if (major === 251) {
+      // DPT 251: RGBW colour
+      const r = rawBuf[0],
+        g = rawBuf[1],
+        b = rawBuf[2],
+        w = rawBuf[3];
+      return `RGBW(${r},${g},${b},${w})`;
+    }
+  }
+  if (rawBuf.length === 8 && major === 19) {
+    // DPT 19: date/time
+    const year = 1900 + rawBuf[0];
+    const month = rawBuf[1] & 0x0f;
+    const day = rawBuf[2] & 0x1f;
+    const hour = rawBuf[3] & 0x1f;
+    const min = rawBuf[4] & 0x3f;
+    const sec = rawBuf[5] & 0x3f;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+  if (rawBuf.length === 14 && major === 16) {
+    // DPT 16: 14-byte string
+    let end = rawBuf.indexOf(0x00);
+    if (end === -1) end = 14;
+    return rawBuf.subarray(0, end).toString('latin1');
   }
   return null;
 }
@@ -397,22 +506,18 @@ router.post('/bus/program-device', async (req, res) => {
 
   // Load app model (load procedures)
   if (!dev.app_ref)
-    return res
-      .status(400)
-      .json({
-        error: 'no_app',
-        message:
-          'Device has no application program reference. Re-import the project.',
-      });
+    return res.status(400).json({
+      error: 'no_app',
+      message:
+        'Device has no application program reference. Re-import the project.',
+    });
   const safe = dev.app_ref.replace(/[^a-zA-Z0-9_-]/g, '_');
   const modelPath = path.join(APPS_DIR, safe + '.json');
   if (!fs.existsSync(modelPath))
-    return res
-      .status(400)
-      .json({
-        error: 'no_model',
-        message: 'App model not found. Re-import the project.',
-      });
+    return res.status(400).json({
+      error: 'no_model',
+      message: 'App model not found. Re-import the project.',
+    });
   let model;
   try {
     model = JSON.parse(fs.readFileSync(modelPath, 'utf8'));
@@ -420,12 +525,10 @@ router.post('/bus/program-device', async (req, res) => {
     return res.status(500).json({ error: 'Failed to read app model' });
   }
   if (!model.loadProcedures?.length)
-    return res
-      .status(400)
-      .json({
-        error: 'no_ldctrl',
-        message: 'No load procedures found. Re-import the project.',
-      });
+    return res.status(400).json({
+      error: 'no_ldctrl',
+      message: 'No load procedures found. Re-import the project.',
+    });
 
   // Build GA table from project data
   const coRows = db.all(
