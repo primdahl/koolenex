@@ -116,7 +116,7 @@ function getDptInfo(projectId) {
 }
 
 // Build a tracked UPDATE helper: collects SET clauses, values, and audit diffs
-function makeTracker(old) {
+function makeUpdateBuilder(old) {
   const sets = [],
     vals = [],
     diffs = [];
@@ -151,7 +151,7 @@ module.exports = {
   readMasterXml,
   parseMasterXml,
   getDptInfo,
-  makeTracker,
+  makeUpdateBuilder,
   saveModelsAndMasterXml,
   toArr,
   _spaceUsageCache,

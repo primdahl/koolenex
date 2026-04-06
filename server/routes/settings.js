@@ -6,7 +6,7 @@ const {
   readMasterXml,
   parseMasterXml,
   toArr,
-  makeTracker,
+  makeUpdateBuilder,
   _spaceUsageCache,
   _translationCache,
   _mediumTypeCache,
@@ -269,7 +269,7 @@ router.put('/projects/:pid/topology/:tid', (req, res) => {
     +pid,
   ]);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const { track, sets, vals, diffs } = makeTracker(old);
+  const { track, sets, vals, diffs } = makeUpdateBuilder(old);
   if (b.name !== undefined) track('name', b.name);
   if (b.medium !== undefined) track('medium', b.medium);
   if (!sets.length)
@@ -370,7 +370,7 @@ router.put('/projects/:pid/spaces/:sid', (req, res) => {
     +pid,
   ]);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const { track, sets, vals, diffs } = makeTracker(old);
+  const { track, sets, vals, diffs } = makeUpdateBuilder(old);
   if (b.name !== undefined) track('name', b.name.trim());
   if (!sets.length)
     return res.status(400).json({ error: 'No fields to update' });

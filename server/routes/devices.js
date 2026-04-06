@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const db = require('../db');
-const { DATA_DIR, APPS_DIR, makeTracker } = require('./shared');
+const { DATA_DIR, APPS_DIR, makeUpdateBuilder } = require('./shared');
 
 const router = express.Router();
 const upload = multer({
@@ -76,7 +76,7 @@ router.put('/projects/:pid/devices/:did', (req, res) => {
     +pid,
   ]);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const { track, sets, vals, diffs } = makeTracker(old);
+  const { track, sets, vals, diffs } = makeUpdateBuilder(old);
   if (b.name !== undefined) track('name', b.name.trim());
   if (b.device_type !== undefined)
     track('device_type', b.device_type || 'generic');

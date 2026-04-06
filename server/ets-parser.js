@@ -140,11 +140,11 @@ const orderedXmlParser = new XMLParser({
   htmlEntities: true,
   trimValues: false,
 });
-const ordA = (el, name) => clean(el?.[':@']?.[`@_${name}`] ?? '');
-const ordRaw = (el, name) => (el?.[':@']?.[`@_${name}`] ?? '').toString();
-const ordTag = (el) => Object.keys(el || {}).find((k) => k !== ':@');
-const ordChildren = (el) => {
-  const tag = ordTag(el);
+const ordAttr = (el, name) => sanitizeText(el?.[':@']?.[`@_${name}`] ?? '');
+const ordRawAttr = (el, name) => (el?.[':@']?.[`@_${name}`] ?? '').toString();
+const ordTagName = (el) => Object.keys(el || {}).find((k) => k !== ':@');
+const ordChildNodes = (el) => {
+  const tag = ordTagName(el);
   const c = tag ? el[tag] : null;
   return Array.isArray(c) ? c : [];
 };
@@ -161,7 +161,7 @@ const toArr = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
  *   2. Remove every ASCII control character (codes 0–31 and 127) that results.
  *   3. Collapse runs of whitespace and trim.
  */
-const clean = (s) => {
+const sanitizeText = (s) => {
   let str = (s ?? '').toString();
   // Decode hex numeric character references: &#xD; &#x0D; &#XA; etc.
   str = str.replace(/&#[xX]([0-9a-fA-F]+);/g, (_, h) =>
@@ -176,9 +176,9 @@ const clean = (s) => {
   str = str.replace(/[\x00-\x1F\x7F]+/g, ' ');
   return str.replace(/ {2,}/g, ' ').trim();
 };
-const a = (el, name) => clean(el?.[`@_${name}`] ?? '');
-const interp = (tpl, map) =>
-  clean(
+const attr = (el, name) => sanitizeText(el?.[`@_${name}`] ?? '');
+const interpolate = (tpl, map) =>
+  sanitizeText(
     (tpl || '')
       // Named args: {{argCH}} → map.argCH ?? ''
       .replace(/\{\{(\w+)\}\}/g, (_, k) => map[k] ?? '')
@@ -210,7 +210,7 @@ function buildAppIndex(buf) {
   const ap = Array.isArray(apRaw) ? apRaw[0] : apRaw;
   if (!ap) return null;
 
-  const appId = a(ap, 'Id');
+  const appId = attr(ap, 'Id');
 
   // Parse entire app XML with order-preserving parser to extract Dynamic sections
   // and ParameterBlock indent levels (leading spaces in Text attributes that the
@@ -227,17 +227,17 @@ function buildAppIndex(buf) {
     const collectPbIndents = (items) => {
       if (!Array.isArray(items)) return;
       for (const el of items) {
-        const tag = ordTag(el);
+        const tag = ordTagName(el);
         if (!tag || tag === '#text' || tag === '?xml') continue;
         if (tag === 'ParameterBlock') {
-          const id = ordA(el, 'Id');
-          const rawText = ordRaw(el, 'Text');
+          const id = ordAttr(el, 'Id');
+          const rawText = ordRawAttr(el, 'Text');
           if (id && rawText) {
             const leadingSpaces = rawText.match(/^(\s*)/)[1].length;
             if (leadingSpaces > 0) pbIndentMap[id] = leadingSpaces;
           }
         }
-        collectPbIndents(ordChildren(el));
+        collectPbIndents(ordChildNodes(el));
       }
     };
     collectPbIndents(orderedXml);
@@ -245,8 +245,8 @@ function buildAppIndex(buf) {
     const findDynamic = (items) => {
       if (!items) return null;
       for (const el of Array.isArray(items) ? items : [items]) {
-        const tag = ordTag(el);
-        if (tag === 'Dynamic') return ordChildren(el);
+        const tag = ordTagName(el);
+        if (tag === 'Dynamic') return ordChildNodes(el);
         // Recurse into known container elements
         for (const key of [
           'KNX',
@@ -256,7 +256,7 @@ function buildAppIndex(buf) {
           'ApplicationProgram',
         ]) {
           if (tag === key) {
-            const result = findDynamic(ordChildren(el));
+            const result = findDynamic(ordChildNodes(el));
             if (result) return result;
           }
         }
@@ -269,12 +269,12 @@ function buildAppIndex(buf) {
     const findModDefs = (items) => {
       if (!items) return;
       for (const el of Array.isArray(items) ? items : [items]) {
-        const tag = ordTag(el);
+        const tag = ordTagName(el);
         if (tag === 'ModuleDef') {
-          const mdId = ordA(el, 'Id');
-          for (const child of ordChildren(el)) {
-            if (ordTag(child) === 'Dynamic')
-              orderedModDynamics[mdId] = ordChildren(child);
+          const mdId = ordAttr(el, 'Id');
+          for (const child of ordChildNodes(el)) {
+            if (ordTagName(child) === 'Dynamic')
+              orderedModDynamics[mdId] = ordChildNodes(child);
           }
         }
         // Recurse into containers
@@ -287,7 +287,7 @@ function buildAppIndex(buf) {
           'Static',
           'ModuleDefs',
         ]) {
-          if (tag === key) findModDefs(ordChildren(el));
+          if (tag === key) findModDefs(ordChildNodes(el));
         }
       }
     };
@@ -301,12 +301,13 @@ function buildAppIndex(buf) {
     for (const langNode of toArr(langs)) {
       for (const tu of toArr(langNode?.TranslationUnit)) {
         for (const el of toArr(tu?.TranslationElement)) {
-          const refId = a(el, 'RefId');
+          const refId = attr(el, 'RefId');
           if (!refId) continue;
           if (!trans[refId]) trans[refId] = {};
           for (const t of toArr(el.Translation)) {
-            const attr = a(t, 'AttributeName');
-            if (attr && !trans[refId][attr]) trans[refId][attr] = a(t, 'Text');
+            const attrName = attr(t, 'AttributeName');
+            if (attrName && !trans[refId][attrName])
+              trans[refId][attrName] = attr(t, 'Text');
           }
         }
       }
@@ -314,8 +315,10 @@ function buildAppIndex(buf) {
   };
   const allLangs = toArr(mfrNode?.Languages?.Language);
   // English-speaking locales first so they take priority
-  const enLangs = allLangs.filter((l) => /^en/i.test(a(l, 'Identifier')));
-  const otherLangs = allLangs.filter((l) => !/^en/i.test(a(l, 'Identifier')));
+  const enLangs = allLangs.filter((l) => /^en/i.test(attr(l, 'Identifier')));
+  const otherLangs = allLangs.filter(
+    (l) => !/^en/i.test(attr(l, 'Identifier')),
+  );
   collectTrans(enLangs);
   collectTrans(otherLangs);
 
@@ -337,18 +340,18 @@ function buildAppIndex(buf) {
       ...toArr(st.ComObjectTable?.ComObject),
     ];
     for (const co of coList) {
-      const id = a(co, 'Id');
+      const id = attr(co, 'Id');
       if (!id) continue;
       coDefs[id] = {
-        num: parseInt(a(co, 'Number')) || 0,
-        text: T(id, 'Text') || a(co, 'Text') || '',
-        ft: T(id, 'FunctionText') || a(co, 'FunctionText') || '',
-        dpt: a(co, 'DatapointType'),
-        size: a(co, 'ObjectSize'),
-        read: a(co, 'ReadFlag'),
-        write: a(co, 'WriteFlag'),
-        comm: a(co, 'CommunicationFlag'),
-        tx: a(co, 'TransmitFlag'),
+        num: parseInt(attr(co, 'Number')) || 0,
+        text: T(id, 'Text') || attr(co, 'Text') || '',
+        ft: T(id, 'FunctionText') || attr(co, 'FunctionText') || '',
+        dpt: attr(co, 'DatapointType'),
+        size: attr(co, 'ObjectSize'),
+        read: attr(co, 'ReadFlag'),
+        write: attr(co, 'WriteFlag'),
+        comm: attr(co, 'CommunicationFlag'),
+        tx: attr(co, 'TransmitFlag'),
       };
     }
   }
@@ -357,18 +360,18 @@ function buildAppIndex(buf) {
   const corDefs = {}; // corId → { refId, overrides... }
   for (const st of allStaticSections) {
     for (const cor of toArr(st.ComObjectRefs?.ComObjectRef)) {
-      const id = a(cor, 'Id');
+      const id = attr(cor, 'Id');
       if (!id) continue;
       corDefs[id] = {
-        refId: a(cor, 'RefId'),
-        text: T(id, 'Text') || a(cor, 'Text') || null,
-        ft: T(id, 'FunctionText') || a(cor, 'FunctionText') || null,
-        dpt: a(cor, 'DatapointType') || null,
-        size: a(cor, 'ObjectSize') || null,
-        read: a(cor, 'ReadFlag') || null,
-        write: a(cor, 'WriteFlag') || null,
-        comm: a(cor, 'CommunicationFlag') || null,
-        tx: a(cor, 'TransmitFlag') || null,
+        refId: attr(cor, 'RefId'),
+        text: T(id, 'Text') || attr(cor, 'Text') || null,
+        ft: T(id, 'FunctionText') || attr(cor, 'FunctionText') || null,
+        dpt: attr(cor, 'DatapointType') || null,
+        size: attr(cor, 'ObjectSize') || null,
+        read: attr(cor, 'ReadFlag') || null,
+        write: attr(cor, 'WriteFlag') || null,
+        comm: attr(cor, 'CommunicationFlag') || null,
+        tx: attr(cor, 'TransmitFlag') || null,
       };
     }
   }
@@ -377,21 +380,21 @@ function buildAppIndex(buf) {
   const argDefs = {};
   for (const md of toArr(ap.ModuleDefs?.ModuleDef)) {
     for (const arg of toArr(md.Arguments?.Argument))
-      if (a(arg, 'Id')) argDefs[a(arg, 'Id')] = a(arg, 'Name');
+      if (attr(arg, 'Id')) argDefs[attr(arg, 'Id')] = attr(arg, 'Name');
   }
 
   // 5. Module instantiations (Dynamic section): fullModId → { argName: value, _count: N }
   const modArgs = {};
   const collectMods = (mods) => {
     for (const mod of mods) {
-      const mid = a(mod, 'Id');
+      const mid = attr(mod, 'Id');
       if (!mid) continue;
       const args = {};
       for (const na of toArr(mod.NumericArg)) {
-        const name = argDefs[a(na, 'RefId')];
-        if (name) args[name] = a(na, 'Value');
+        const name = argDefs[attr(na, 'RefId')];
+        if (name) args[name] = attr(na, 'Value');
       }
-      const count = parseInt(a(mod, 'Count')) || 1;
+      const count = parseInt(attr(mod, 'Count')) || 1;
       args._count = count;
       modArgs[mid] = args;
     }
@@ -405,19 +408,22 @@ function buildAppIndex(buf) {
   for (const ch of toArr(ap.ModuleDefs?.ModuleDef).flatMap((md) =>
     toArr(md.Dynamic?.Channel),
   )) {
-    const id = a(ch, 'Id');
-    if (id) chanDefs[id] = T(id, 'Text') || a(ch, 'Text') || a(ch, 'Name');
+    const id = attr(ch, 'Id');
+    if (id)
+      chanDefs[id] = T(id, 'Text') || attr(ch, 'Text') || attr(ch, 'Name');
   }
   // Top-level Dynamic channels
   for (const ch of toArr(ap.Dynamic?.Channel)) {
-    const id = a(ch, 'Id');
-    if (id) chanDefs[id] = T(id, 'Text') || a(ch, 'Text') || a(ch, 'Name');
+    const id = attr(ch, 'Id');
+    if (id)
+      chanDefs[id] = T(id, 'Text') || attr(ch, 'Text') || attr(ch, 'Name');
   }
   // Static channel definitions (Static/Channels/Channel)
   for (const st of allStaticSections) {
     for (const ch of toArr(st.Channels?.Channel)) {
-      const id = a(ch, 'Id');
-      if (id) chanDefs[id] = T(id, 'Text') || a(ch, 'Text') || a(ch, 'Name');
+      const id = attr(ch, 'Id');
+      if (id)
+        chanDefs[id] = T(id, 'Text') || attr(ch, 'Text') || attr(ch, 'Name');
     }
   }
 
@@ -433,8 +439,8 @@ function buildAppIndex(buf) {
   function resolveCoRef(relRefId, channelId) {
     const buildResult = (cor, co, args, channel) => ({
       objectNumber: co.num,
-      name: interp(cor.text || co.text, args),
-      function_text: interp(cor.ft || co.ft, args),
+      name: interpolate(cor.text || co.text, args),
+      function_text: interpolate(cor.ft || co.ft, args),
       channel,
       dpt: cor.dpt || co.dpt || '',
       objectSize: cor.size || co.size || '',
@@ -457,10 +463,13 @@ function buildAppIndex(buf) {
       if (channelId) {
         const cm = channelId.match(/^(MD-\d+)_M-\d+_MI-\d+_(CH-\w+)$/);
         if (cm)
-          channel = interp(chanDefs[`${appId}_${cm[1]}_${cm[2]}`] || '', args);
+          channel = interpolate(
+            chanDefs[`${appId}_${cm[1]}_${cm[2]}`] || '',
+            args,
+          );
         else
           channel =
-            interp(chanDefs[`${appId}_${channelId}`] || '', args) ||
+            interpolate(chanDefs[`${appId}_${channelId}`] || '', args) ||
             chanDefs[channelId] ||
             channelId;
       }
@@ -475,7 +484,7 @@ function buildAppIndex(buf) {
       const co = coDefs[cor.refId];
       if (!co) return null;
       const ch = channelId
-        ? interp(chanDefs[`${appId}_${channelId}`] || '', {}) ||
+        ? interpolate(chanDefs[`${appId}_${channelId}`] || '', {}) ||
           chanDefs[channelId] ||
           channelId
         : '';
@@ -499,7 +508,7 @@ function buildAppIndex(buf) {
   const paramTypes = {};
   for (const st of allStaticSections) {
     for (const pt of toArr(st.ParameterTypes?.ParameterType)) {
-      const tid = a(pt, 'Id');
+      const tid = attr(pt, 'Id');
       if (!tid) continue;
       if ('TypeNone' in pt) {
         paramTypes[tid] = { kind: 'none', enums: {} };
@@ -509,25 +518,25 @@ function buildAppIndex(buf) {
         const tn = Array.isArray(pt.TypeNumber)
           ? pt.TypeNumber[0]
           : pt.TypeNumber;
-        const uiHint = a(tn, 'UIHint') || '';
-        const coeff = a(tn, 'Coefficient');
+        const uiHint = attr(tn, 'UIHint') || '';
+        const coeff = attr(tn, 'Coefficient');
         paramTypes[tid] = {
           kind: uiHint === 'CheckBox' ? 'checkbox' : 'number',
           enums: {},
           min:
-            a(tn, 'minInclusive') !== ''
-              ? Number(a(tn, 'minInclusive'))
-              : a(tn, 'Minimum') !== ''
-                ? Number(a(tn, 'Minimum'))
+            attr(tn, 'minInclusive') !== ''
+              ? Number(attr(tn, 'minInclusive'))
+              : attr(tn, 'Minimum') !== ''
+                ? Number(attr(tn, 'Minimum'))
                 : null,
           max:
-            a(tn, 'maxInclusive') !== ''
-              ? Number(a(tn, 'maxInclusive'))
-              : a(tn, 'Maximum') !== ''
-                ? Number(a(tn, 'Maximum'))
+            attr(tn, 'maxInclusive') !== ''
+              ? Number(attr(tn, 'maxInclusive'))
+              : attr(tn, 'Maximum') !== ''
+                ? Number(attr(tn, 'Maximum'))
                 : null,
-          step: a(tn, 'Step') !== '' ? Number(a(tn, 'Step')) : null,
-          sizeInBit: parseInt(a(tn, 'SizeInBit')) || 8,
+          step: attr(tn, 'Step') !== '' ? Number(attr(tn, 'Step')) : null,
+          sizeInBit: parseInt(attr(tn, 'SizeInBit')) || 8,
           ...(coeff ? { coefficient: parseFloat(coeff) } : {}),
           uiHint,
         };
@@ -535,41 +544,45 @@ function buildAppIndex(buf) {
       }
       if (pt.TypeFloat) {
         const tf = Array.isArray(pt.TypeFloat) ? pt.TypeFloat[0] : pt.TypeFloat;
-        const coeff = a(tf, 'Coefficient');
+        const coeff = attr(tf, 'Coefficient');
         paramTypes[tid] = {
           kind: 'float',
           enums: {},
           min:
-            a(tf, 'minInclusive') !== ''
-              ? Number(a(tf, 'minInclusive'))
-              : a(tf, 'Minimum') !== ''
-                ? Number(a(tf, 'Minimum'))
+            attr(tf, 'minInclusive') !== ''
+              ? Number(attr(tf, 'minInclusive'))
+              : attr(tf, 'Minimum') !== ''
+                ? Number(attr(tf, 'Minimum'))
                 : null,
           max:
-            a(tf, 'maxInclusive') !== ''
-              ? Number(a(tf, 'maxInclusive'))
-              : a(tf, 'Maximum') !== ''
-                ? Number(a(tf, 'Maximum'))
+            attr(tf, 'maxInclusive') !== ''
+              ? Number(attr(tf, 'maxInclusive'))
+              : attr(tf, 'Maximum') !== ''
+                ? Number(attr(tf, 'Maximum'))
                 : null,
           step: null,
-          sizeInBit: parseInt(a(tf, 'SizeInBit')) || 16,
+          sizeInBit: parseInt(attr(tf, 'SizeInBit')) || 16,
           ...(coeff ? { coefficient: parseFloat(coeff) } : {}),
         };
         continue;
       }
       if (pt.TypeTime) {
         const tt = Array.isArray(pt.TypeTime) ? pt.TypeTime[0] : pt.TypeTime;
-        const uiHint = a(tt, 'UIHint') || '';
+        const uiHint = attr(tt, 'UIHint') || '';
         paramTypes[tid] = {
           kind: 'time',
           enums: {},
           min:
-            a(tt, 'minInclusive') !== '' ? Number(a(tt, 'minInclusive')) : null,
+            attr(tt, 'minInclusive') !== ''
+              ? Number(attr(tt, 'minInclusive'))
+              : null,
           max:
-            a(tt, 'maxInclusive') !== '' ? Number(a(tt, 'maxInclusive')) : null,
+            attr(tt, 'maxInclusive') !== ''
+              ? Number(attr(tt, 'maxInclusive'))
+              : null,
           step: null,
-          sizeInBit: parseInt(a(tt, 'SizeInBit')) || 16,
-          unit: a(tt, 'Unit') || '',
+          sizeInBit: parseInt(attr(tt, 'SizeInBit')) || 16,
+          unit: attr(tt, 'Unit') || '',
           uiHint,
         };
         continue;
@@ -579,17 +592,17 @@ function buildAppIndex(buf) {
         paramTypes[tid] = {
           kind: 'text',
           enums: {},
-          sizeInBit: parseInt(a(tt, 'SizeInBit')) || 8,
+          sizeInBit: parseInt(attr(tt, 'SizeInBit')) || 8,
         };
         continue;
       }
       const enums = {};
       for (const e of toArr(pt.TypeRestriction?.Enumeration)) {
-        const val = a(e, 'Value');
-        const txt = T(a(e, 'Id'), 'Text') || a(e, 'Text');
+        const val = attr(e, 'Value');
+        const txt = T(attr(e, 'Id'), 'Text') || attr(e, 'Text');
         if (val !== '' && txt) enums[val] = txt;
       }
-      const trSizeInBit = parseInt(a(pt.TypeRestriction, 'SizeInBit')) || 8;
+      const trSizeInBit = parseInt(attr(pt.TypeRestriction, 'SizeInBit')) || 8;
       paramTypes[tid] = {
         kind: Object.keys(enums).length ? 'enum' : 'other',
         enums,
@@ -607,10 +620,10 @@ function buildAppIndex(buf) {
   // In that convention, all Union child params use relSeg-index offsets (not absolute ETS offsets),
   // so they must be treated identically to standalone params with <Memory> children.
   const addParam = (p, baseOffset = 0, baseFromMem = false) => {
-    const id = a(p, 'Id');
+    const id = attr(p, 'Id');
     if (!id) return;
-    let rawOff = a(p, 'Offset');
-    let rawBitOff = a(p, 'BitOffset');
+    let rawOff = attr(p, 'Offset');
+    let rawBitOff = attr(p, 'BitOffset');
     // Some parameters specify memory via a <Memory> child element rather than direct attributes.
     // This is the standard ETS6 encoding for parameters in <Parameters> (non-Union) sections.
     // Track the source so buildParamMem can distinguish absolute-offset params (Memory child)
@@ -619,17 +632,17 @@ function buildAppIndex(buf) {
     if (rawOff === '') {
       const mem = Array.isArray(p.Memory) ? p.Memory[0] : p.Memory;
       if (mem) {
-        rawOff = a(mem, 'Offset');
-        rawBitOff = a(mem, 'BitOffset');
+        rawOff = attr(mem, 'Offset');
+        rawBitOff = attr(mem, 'BitOffset');
         if (rawOff !== '') fromMemoryChild = true;
       }
     }
     paramDefs[id] = {
       // Use Text attribute (display label), NOT Name (internal code identifier)
-      text: T(id, 'Text') || a(p, 'Text') || '',
-      typeRef: a(p, 'ParameterType'),
-      value: a(p, 'Value'), // factory default value
-      access: a(p, 'Access') || null,
+      text: T(id, 'Text') || attr(p, 'Text') || '',
+      typeRef: attr(p, 'ParameterType'),
+      value: attr(p, 'Value'), // factory default value
+      access: attr(p, 'Access') || null,
       // Memory layout — null means not directly memory-mapped (e.g. Union child with no Offset)
       offset:
         rawOff !== ''
@@ -641,7 +654,7 @@ function buildAppIndex(buf) {
       fromMemoryChild: fromMemoryChild,
       // DefaultUnionParameter="0" marks the first (default-active) param in a Union —
       // its default value should be written even when not in currentValues.
-      isDefaultUnionParam: a(p, 'DefaultUnionParameter') === '0',
+      isDefaultUnionParam: attr(p, 'DefaultUnionParameter') === '0',
     };
   };
   for (const st of allStaticSections) {
@@ -649,12 +662,12 @@ function buildAppIndex(buf) {
     for (const u of toArr(st.Parameters?.Union)) {
       // Union children share the union's byte offset; their own @Offset is relative to it.
       // The union's offset may be in a <Memory Offset="X"> child element rather than a direct attribute.
-      let uOffset = parseInt(a(u, 'Offset'));
+      let uOffset = parseInt(attr(u, 'Offset'));
       let uFromMem = false;
       if (isNaN(uOffset) || uOffset === 0) {
         const uMem = Array.isArray(u.Memory) ? u.Memory[0] : u.Memory;
         if (uMem) {
-          const memOff = parseInt(a(uMem, 'Offset'));
+          const memOff = parseInt(attr(uMem, 'Offset'));
           if (!isNaN(memOff)) {
             uOffset = memOff;
             uFromMem = true;
@@ -671,15 +684,15 @@ function buildAppIndex(buf) {
   const paramRefDefs = {};
   for (const st of allStaticSections) {
     for (const pr of toArr(st.ParameterRefs?.ParameterRef)) {
-      const id = a(pr, 'Id');
+      const id = attr(pr, 'Id');
       if (!id) continue;
       paramRefDefs[id] = {
-        paramId: a(pr, 'RefId'),
+        paramId: attr(pr, 'RefId'),
         // Use Text attribute (display label), NOT Name (internal code identifier like P_ZeitLang)
-        text: T(id, 'Text') || a(pr, 'Text') || null,
-        access: a(pr, 'Access') || null,
+        text: T(id, 'Text') || attr(pr, 'Text') || null,
+        access: attr(pr, 'Access') || null,
         // A non-empty Value attribute overrides the Parameter's default value for this ref.
-        prDefault: a(pr, 'Value') || null,
+        prDefault: attr(pr, 'Value') || null,
       };
     }
   }
@@ -693,11 +706,11 @@ function buildAppIndex(buf) {
   // ETS uses leading spaces in ParameterBlock Text to encode visual hierarchy.
   // fast-xml-parser trims attribute values, but pbIndentMap captures the count from raw XML.
   const pbLabel = (pb, fallback) => {
-    const id = a(pb, 'Id');
+    const id = attr(pb, 'Id');
     const indent = pbIndentMap[id] || 0;
-    let label = T(id, 'Text') || a(pb, 'Text');
+    let label = T(id, 'Text') || attr(pb, 'Text');
     if (!label) {
-      const prId = a(pb, 'ParamRefId');
+      const prId = attr(pb, 'ParamRefId');
       if (prId) {
         const pr = paramRefDefs[prId];
         if (pr)
@@ -708,7 +721,7 @@ function buildAppIndex(buf) {
             '';
       }
     }
-    return { label: label || a(pb, 'Name') || fallback || '', indent };
+    return { label: label || attr(pb, 'Name') || fallback || '', indent };
   };
 
   // 8b. Section map from Dynamic: ParameterRef fullId → section label (template)
@@ -726,7 +739,7 @@ function buildAppIndex(buf) {
   ) => {
     for (const item of toArr(items)) {
       for (const rr of toArr(item.ParameterRefRef)) {
-        const rid = a(rr, 'RefId');
+        const rid = attr(rr, 'RefId');
         if (rid && !paramRefSectionMap[rid]) {
           paramRefSectionMap[rid] = sectionTpl;
           paramRefGroupMap[rid] = groupLabel;
@@ -747,7 +760,7 @@ function buildAppIndex(buf) {
     if (!dyn) return;
     for (const ch of toArr(dyn.Channel)) {
       const chLabel =
-        T(a(ch, 'Id'), 'Text') || a(ch, 'Text') || a(ch, 'Name') || '';
+        T(attr(ch, 'Id'), 'Text') || attr(ch, 'Text') || attr(ch, 'Name') || '';
       walkDynamic([ch], chLabel, chLabel, 0); // channel label = both section fallback and group
     }
     for (const cib of toArr(dyn.ChannelIndependentBlock))
@@ -797,14 +810,14 @@ function buildAppIndex(buf) {
 
     // Section label — from Dynamic map, template-substituted
     const sectionTpl = paramRefSectionMap[prKey] || '';
-    const section = sectionTpl ? interp(sectionTpl, args) : '';
+    const section = sectionTpl ? interpolate(sectionTpl, args) : '';
     const groupTpl = paramRefGroupMap[prKey] || '';
-    const group = groupTpl ? interp(groupTpl, args) : '';
+    const group = groupTpl ? interpolate(groupTpl, args) : '';
 
     // Display name — ParameterRef text override takes priority, then Parameter text
     const nameTpl = pr.text || pd.text;
     if (!nameTpl) return null;
-    const name = interp(nameTpl, args) || nameTpl;
+    const name = interpolate(nameTpl, args) || nameTpl;
     if (!name || /^calc/i.test(name)) return null;
 
     // Display value — enum lookup for TypeRestriction, raw otherwise
@@ -837,59 +850,59 @@ function buildAppIndex(buf) {
     if (!ordItems || !ordItems.length) return [];
     const result = [];
     for (const el of ordItems) {
-      const tag = ordTag(el);
+      const tag = ordTagName(el);
       if (!tag) continue;
       if (tag === 'ParameterRefRef') {
-        const refId = ordA(el, 'RefId');
+        const refId = ordAttr(el, 'RefId');
         if (refId)
           result.push({
             type: 'paramRef',
             refId,
-            cell: ordA(el, 'Cell') || undefined,
+            cell: ordAttr(el, 'Cell') || undefined,
           });
       } else if (tag === 'ParameterSeparator') {
-        const id = ordA(el, 'Id');
+        const id = ordAttr(el, 'Id');
         result.push({
           type: 'separator',
           id,
-          text: T(id, 'Text') || ordA(el, 'Text'),
-          uiHint: ordA(el, 'UIHint'),
+          text: T(id, 'Text') || ordAttr(el, 'Text'),
+          uiHint: ordAttr(el, 'UIHint'),
         });
       } else if (tag === 'ParameterBlock') {
-        const id = ordA(el, 'Id');
-        const children = ordChildren(el);
+        const id = ordAttr(el, 'Id');
+        const children = ordChildNodes(el);
         let rows, columns;
-        if (ordA(el, 'Layout') === 'Table') {
+        if (ordAttr(el, 'Layout') === 'Table') {
           rows = [];
           columns = [];
           for (const child of children) {
-            const ctag = ordTag(child);
+            const ctag = ordTagName(child);
             if (ctag === 'Rows')
-              for (const r of ordChildren(child))
-                if (ordTag(r) === 'Row')
+              for (const r of ordChildNodes(child))
+                if (ordTagName(r) === 'Row')
                   rows.push({
-                    id: ordA(r, 'Id'),
+                    id: ordAttr(r, 'Id'),
                     text:
-                      T(ordA(r, 'Id'), 'Text') ||
-                      ordA(r, 'Text') ||
-                      ordA(r, 'Name'),
+                      T(ordAttr(r, 'Id'), 'Text') ||
+                      ordAttr(r, 'Text') ||
+                      ordAttr(r, 'Name'),
                   });
             if (ctag === 'Columns')
-              for (const c of ordChildren(child))
-                if (ordTag(c) === 'Column')
+              for (const c of ordChildNodes(child))
+                if (ordTagName(c) === 'Column')
                   columns.push({
-                    id: ordA(c, 'Id'),
+                    id: ordAttr(c, 'Id'),
                     text:
-                      T(ordA(c, 'Id'), 'Text') ||
-                      ordA(c, 'Text') ||
-                      ordA(c, 'Name'),
-                    width: ordA(c, 'Width') || undefined,
+                      T(ordAttr(c, 'Id'), 'Text') ||
+                      ordAttr(c, 'Text') ||
+                      ordAttr(c, 'Name'),
+                    width: ordAttr(c, 'Width') || undefined,
                   });
           }
         }
-        let blockText = T(id, 'Text') || ordA(el, 'Text') || '';
+        let blockText = T(id, 'Text') || ordAttr(el, 'Text') || '';
         if (!blockText) {
-          const prId = ordA(el, 'ParamRefId');
+          const prId = ordAttr(el, 'ParamRefId');
           if (prId) {
             const pr = paramRefDefs[prId];
             const pd = pr ? paramDefs[pr.paramId] : null;
@@ -900,30 +913,30 @@ function buildAppIndex(buf) {
           type: 'block',
           id,
           text: blockText,
-          name: ordA(el, 'Name'),
-          inline: ordA(el, 'Inline') === 'true',
-          access: ordA(el, 'Access') || undefined,
-          layout: ordA(el, 'Layout') || undefined,
+          name: ordAttr(el, 'Name'),
+          inline: ordAttr(el, 'Inline') === 'true',
+          access: ordAttr(el, 'Access') || undefined,
+          layout: ordAttr(el, 'Layout') || undefined,
           rows,
           columns,
           items: serOrderedItems(children),
         });
       } else if (tag === 'choose') {
-        const prId = ordA(el, 'ParamRefId');
+        const prId = ordAttr(el, 'ParamRefId');
         const pr = paramRefDefs[prId];
         const pd = pr ? paramDefs[pr.paramId] : null;
         const effectiveAccess = pr?.access ?? pd?.access ?? '';
         const whens = [];
-        for (const w of ordChildren(el)) {
-          if (ordTag(w) !== 'when') continue;
-          const test = (ordA(w, 'test') || ordA(w, 'Value') || '')
+        for (const w of ordChildNodes(el)) {
+          if (ordTagName(w) !== 'when') continue;
+          const test = (ordAttr(w, 'test') || ordAttr(w, 'Value') || '')
             .split(' ')
             .filter(Boolean);
-          const isDefault = ordA(w, 'default') === 'true';
+          const isDefault = ordAttr(w, 'default') === 'true';
           whens.push({
             test,
             isDefault,
-            items: serOrderedItems(ordChildren(w)),
+            items: serOrderedItems(ordChildNodes(w)),
           });
         }
         if (prId)
@@ -937,13 +950,13 @@ function buildAppIndex(buf) {
       } else if (tag === 'Rename') {
         result.push({
           type: 'rename',
-          refId: ordA(el, 'RefId'),
-          text: T(ordA(el, 'Id'), 'Text') || ordA(el, 'Text'),
+          refId: ordAttr(el, 'RefId'),
+          text: T(ordAttr(el, 'Id'), 'Text') || ordAttr(el, 'Text'),
         });
       } else if (tag === 'Assign') {
-        const target = ordA(el, 'TargetParamRefRef');
-        const source = ordA(el, 'SourceParamRefRef') || null;
-        const value = ordA(el, 'Value');
+        const target = ordAttr(el, 'TargetParamRefRef');
+        const source = ordAttr(el, 'SourceParamRefRef') || null;
+        const value = ordAttr(el, 'Value');
         if (target && (source || value !== ''))
           result.push({
             type: 'assign',
@@ -952,19 +965,20 @@ function buildAppIndex(buf) {
             value: value !== '' ? value : null,
           });
       } else if (tag === 'ComObjectRefRef') {
-        result.push({ type: 'comRef', refId: ordA(el, 'RefId') });
+        result.push({ type: 'comRef', refId: ordAttr(el, 'RefId') });
       } else if (tag === 'Channel') {
-        const chId = ordA(el, 'Id');
-        const textPrId = ordA(el, 'TextParameterRefId') || undefined;
+        const chId = ordAttr(el, 'Id');
+        const textPrId = ordAttr(el, 'TextParameterRefId') || undefined;
         result.push({
           type: 'channel',
           id: chId,
-          label: T(chId, 'Text') || ordA(el, 'Text') || ordA(el, 'Name') || '',
+          label:
+            T(chId, 'Text') || ordAttr(el, 'Text') || ordAttr(el, 'Name') || '',
           textParamRefId: textPrId,
-          items: serOrderedItems(ordChildren(el)),
+          items: serOrderedItems(ordChildNodes(el)),
         });
       } else if (tag === 'ChannelIndependentBlock') {
-        result.push({ type: 'cib', items: serOrderedItems(ordChildren(el)) });
+        result.push({ type: 'cib', items: serOrderedItems(ordChildNodes(el)) });
       }
     }
     return result;
@@ -1026,7 +1040,7 @@ function buildAppIndex(buf) {
               let ch = channelLabel || '';
               if (ch && ch.includes('{{')) {
                 const mdMatch = item.refId.match(/_(MD-\w+)_(M-\d+)_/);
-                ch = interp(
+                ch = interpolate(
                   ch,
                   mdMatch
                     ? modArgs[`${appId}_${mdMatch[1]}_${mdMatch[2]}`] || {}
@@ -1134,8 +1148,8 @@ function buildAppIndex(buf) {
       : {};
     return {
       objectNumber: co.num,
-      name: interp(cor.text || co.text, args),
-      function_text: interp(cor.ft || co.ft, args),
+      name: interpolate(cor.text || co.text, args),
+      function_text: interpolate(cor.ft || co.ft, args),
       dpt: cor.dpt || co.dpt || '',
       objectSize: cor.size || co.size || '',
       read: (cor.read ?? co.read) === 'Enabled',
@@ -1184,7 +1198,7 @@ function buildAppIndex(buf) {
       main: orderedDynamic ? { items: serOrderedItems(orderedDynamic) } : null,
       moduleDefs: toArr(ap.ModuleDefs?.ModuleDef)
         .map((md) => {
-          const mdId = a(md, 'Id');
+          const mdId = attr(md, 'Id');
           const ordDyn = orderedModDynamics[mdId];
           return { id: mdId, items: ordDyn ? serOrderedItems(ordDyn) : [] };
         })
@@ -1230,7 +1244,7 @@ function buildAppIndex(buf) {
     const relSegData = {};
     for (const st of allStaticSections) {
       for (const rs of toArr(st.Code?.RelativeSegment)) {
-        const lsm = parseInt(a(rs, 'LoadStateMachine'));
+        const lsm = parseInt(attr(rs, 'LoadStateMachine'));
         if (!lsm) continue;
         const rawData = typeof rs.Data === 'string' ? rs.Data : '';
         if (rawData) {
@@ -1250,8 +1264,8 @@ function buildAppIndex(buf) {
     const absSegData = {};
     for (const st of allStaticSections) {
       for (const as of toArr(st.Code?.AbsoluteSegment)) {
-        const addr = parseInt(a(as, 'Address'));
-        const size = parseInt(a(as, 'Size')) || 0;
+        const addr = parseInt(attr(as, 'Address'));
+        const size = parseInt(attr(as, 'Size')) || 0;
         if (isNaN(addr)) continue;
         const rawData = typeof as.Data === 'string' ? as.Data : '';
         let hex = '';
@@ -1282,62 +1296,62 @@ function buildAppIndex(buf) {
   const loadProcedures = [];
   for (const lp of toArr(ap.Static?.LoadProcedures?.LoadProcedure)) {
     for (const el of toArr(lp.LdCtrlRelSegment)) {
-      const lsmIdx = parseInt(a(el, 'LsmIdx')) || 4;
-      const size = parseInt(a(el, 'Size')) || 0;
-      const mode = a(el, 'AppliesTo') || 'full';
+      const lsmIdx = parseInt(attr(el, 'LsmIdx')) || 4;
+      const size = parseInt(attr(el, 'Size')) || 0;
+      const mode = attr(el, 'AppliesTo') || 'full';
       loadProcedures.push({
         type: 'RelSegment',
         lsmIdx,
         size,
         mode,
-        fill: parseInt(a(el, 'Fill')) || 0,
+        fill: parseInt(attr(el, 'Fill')) || 0,
       });
     }
     for (const el of toArr(lp.LdCtrlWriteProp)) {
-      const raw = a(el, 'InlineData');
+      const raw = attr(el, 'InlineData');
       const data = raw ? Buffer.from(raw.replace(/\s/g, ''), 'hex') : null;
       if (data && data.length) {
         loadProcedures.push({
           type: 'WriteProp',
-          objIdx: parseInt(a(el, 'ObjIdx')) || 0,
-          propId: parseInt(a(el, 'PropId')) || 0,
+          objIdx: parseInt(attr(el, 'ObjIdx')) || 0,
+          propId: parseInt(attr(el, 'PropId')) || 0,
           data: data.toString('hex'),
         });
       }
     }
     for (const el of toArr(lp.LdCtrlCompareProp)) {
-      const raw = a(el, 'InlineData');
+      const raw = attr(el, 'InlineData');
       const data = raw ? raw.replace(/\s/g, '') : '';
       loadProcedures.push({
         type: 'CompareProp',
-        objIdx: parseInt(a(el, 'ObjIdx')) || 0,
-        propId: parseInt(a(el, 'PropId')) || 0,
+        objIdx: parseInt(attr(el, 'ObjIdx')) || 0,
+        propId: parseInt(attr(el, 'PropId')) || 0,
         data,
       });
     }
     for (const el of toArr(lp.LdCtrlWriteRelMem)) {
-      const mode = a(el, 'AppliesTo') || 'full';
+      const mode = attr(el, 'AppliesTo') || 'full';
       loadProcedures.push({
         type: 'WriteRelMem',
-        objIdx: parseInt(a(el, 'ObjIdx')) || 4,
-        offset: parseInt(a(el, 'Offset')) || 0,
-        size: parseInt(a(el, 'Size')) || 0,
+        objIdx: parseInt(attr(el, 'ObjIdx')) || 4,
+        offset: parseInt(attr(el, 'Offset')) || 0,
+        size: parseInt(attr(el, 'Size')) || 0,
         mode,
       });
     }
     for (const el of toArr(lp.LdCtrlLoadImageProp)) {
       loadProcedures.push({
         type: 'LoadImageProp',
-        objIdx: parseInt(a(el, 'ObjIdx')) || 0,
-        propId: parseInt(a(el, 'PropId')) || 27,
+        objIdx: parseInt(attr(el, 'ObjIdx')) || 0,
+        propId: parseInt(attr(el, 'PropId')) || 27,
       });
     }
     for (const el of toArr(lp.LdCtrlAbsSegment)) {
       loadProcedures.push({
         type: 'AbsSegment',
-        lsmIdx: parseInt(a(el, 'LsmIdx')) || 0,
-        address: parseInt(a(el, 'Address')) || 0,
-        size: parseInt(a(el, 'Size')) || 0,
+        lsmIdx: parseInt(attr(el, 'LsmIdx')) || 0,
+        address: parseInt(attr(el, 'Address')) || 0,
+        size: parseInt(attr(el, 'Size')) || 0,
       });
     }
   }
@@ -1374,14 +1388,14 @@ function parseLocationsRec(
     const sp = spaceEls[i];
     const idx = spaces.length;
     spaces.push({
-      name: a(sp, 'Name'),
-      type: a(sp, 'Type') || 'Room',
-      usage_id: a(sp, 'Usage') || '',
+      name: attr(sp, 'Name'),
+      type: attr(sp, 'Type') || 'Room',
+      usage_id: attr(sp, 'Usage') || '',
       parent_idx: parentIdx,
       sort_order: i,
     });
     for (const ref of toArr(sp.DeviceInstanceRef)) {
-      const ia = devInstById[a(ref, 'RefId')];
+      const ia = devInstById[attr(ref, 'RefId')];
       if (ia) devSpaceMap[ia] = idx;
     }
     parseLocationsRec(toArr(sp.Space), idx, spaces, devSpaceMap, devInstById);
@@ -1412,7 +1426,7 @@ function parseKnxproj(buffer, password = null) {
       knxMasterXml = masterE.getData().toString('utf8');
       const mx = xmlParser.parse(knxMasterXml);
       for (const m of toArr(mx?.KNX?.MasterData?.Manufacturers?.Manufacturer))
-        if (a(m, 'Id')) mfrById[a(m, 'Id')] = a(m, 'Name');
+        if (attr(m, 'Id')) mfrById[attr(m, 'Id')] = attr(m, 'Name');
     } catch (_) {}
   }
 
@@ -1436,23 +1450,23 @@ function parseKnxproj(buffer, password = null) {
         const hwTransAll = {};
         const hwLangs = toArr(mNode?.Languages?.Language);
         const hwEnLangs = hwLangs.filter((l) =>
-          /^en/i.test(a(l, 'Identifier')),
+          /^en/i.test(attr(l, 'Identifier')),
         );
         const hwOtherLangs = hwLangs.filter(
-          (l) => !/^en/i.test(a(l, 'Identifier')),
+          (l) => !/^en/i.test(attr(l, 'Identifier')),
         );
         for (const langs of [hwEnLangs, hwOtherLangs]) {
           for (const lang of langs) {
-            const langId = a(lang, 'Identifier');
+            const langId = attr(lang, 'Identifier');
             for (const tu of toArr(lang?.TranslationUnit)) {
               for (const el of toArr(tu?.TranslationElement)) {
-                const refId = a(el, 'RefId');
+                const refId = attr(el, 'RefId');
                 if (!refId) continue;
                 for (const t of toArr(el.Translation)) {
-                  if (a(t, 'AttributeName') === 'Text' && a(t, 'Text')) {
-                    if (!hwTrans[refId]) hwTrans[refId] = a(t, 'Text'); // English first wins
+                  if (attr(t, 'AttributeName') === 'Text' && attr(t, 'Text')) {
+                    if (!hwTrans[refId]) hwTrans[refId] = attr(t, 'Text'); // English first wins
                     if (!hwTransAll[refId]) hwTransAll[refId] = {};
-                    hwTransAll[refId][langId] = a(t, 'Text');
+                    hwTransAll[refId][langId] = attr(t, 'Text');
                     break;
                   }
                 }
@@ -1471,23 +1485,25 @@ function parseKnxproj(buffer, password = null) {
 
         for (const outer of toArr(mNode.Hardware)) {
           for (const hw of toArr(outer.Hardware)) {
-            const hwId = a(hw, 'Id');
-            const hwName = hwT(hwId) || a(hw, 'Name');
-            const hwSerial = a(hw, 'SerialNumber');
-            const busCurrent = Math.round(parseFloat(a(hw, 'BusCurrent'))) || 0;
+            const hwId = attr(hw, 'Id');
+            const hwName = hwT(hwId) || attr(hw, 'Name');
+            const hwSerial = attr(hw, 'SerialNumber');
+            const busCurrent =
+              Math.round(parseFloat(attr(hw, 'BusCurrent'))) || 0;
             const widthMm =
               parseFloat(
-                a(hw, 'WidthInMillimeter') ||
-                  a(toArr(hw?.Products?.Product)[0], 'WidthInMillimeter'),
+                attr(hw, 'WidthInMillimeter') ||
+                  attr(toArr(hw?.Products?.Product)[0], 'WidthInMillimeter'),
               ) || 0;
             const isPowerSupply =
-              a(hw, 'IsPowerSupply') === 'true' ||
-              a(hw, 'IsPowerSupply') === '1';
+              attr(hw, 'IsPowerSupply') === 'true' ||
+              attr(hw, 'IsPowerSupply') === '1';
             const isCoupler =
-              a(hw, 'IsCoupler') === 'true' || a(hw, 'IsCoupler') === '1';
+              attr(hw, 'IsCoupler') === 'true' || attr(hw, 'IsCoupler') === '1';
             const isRailMounted =
-              a(toArr(hw?.Products?.Product)[0], 'IsRailMounted') === 'true' ||
-              a(toArr(hw?.Products?.Product)[0], 'IsRailMounted') === '1';
+              attr(toArr(hw?.Products?.Product)[0], 'IsRailMounted') ===
+                'true' ||
+              attr(toArr(hw?.Products?.Product)[0], 'IsRailMounted') === '1';
             const hwExtra = {
               busCurrent,
               widthMm,
@@ -1506,15 +1522,16 @@ function parseKnxproj(buffer, password = null) {
               ...toArr(hw?.Products?.Product),
               ...toArr(hw?.Product),
             ]) {
-              const pId = a(p, 'Id');
-              const baseText = a(p, 'Text') || hwName;
-              const pWidth = parseFloat(a(p, 'WidthInMillimeter')) || widthMm;
-              const defaultLang = a(p, 'DefaultLanguage');
+              const pId = attr(p, 'Id');
+              const baseText = attr(p, 'Text') || hwName;
+              const pWidth =
+                parseFloat(attr(p, 'WidthInMillimeter')) || widthMm;
+              const defaultLang = attr(p, 'DefaultLanguage');
               if (pId)
                 hwByProd[pId] = {
                   manufacturer: mfrName,
                   model: hwT(pId) || baseText,
-                  orderNumber: a(p, 'OrderNumber'),
+                  orderNumber: attr(p, 'OrderNumber'),
                   hwSerial,
                   modelTranslations: hwTAll(pId, baseText, defaultLang),
                   ...hwExtra,
@@ -1525,7 +1542,7 @@ function parseKnxproj(buffer, password = null) {
               ...toArr(hw?.Hardware2Programs?.Hardware2Program),
               ...toArr(hw?.Hardware2Program),
             ])
-              if (a(h, 'Id')) hwByH2P[a(h, 'Id')] = info(hwName);
+              if (attr(h, 'Id')) hwByH2P[attr(h, 'Id')] = info(hwName);
           }
         }
       }
@@ -1550,15 +1567,15 @@ function parseKnxproj(buffer, password = null) {
         // Build translation map for catalog names
         const catTrans = {};
         for (const lang of toArr(mNode?.Languages?.Language).filter((l) =>
-          /^en/i.test(a(l, 'Identifier')),
+          /^en/i.test(attr(l, 'Identifier')),
         )) {
           for (const tu of toArr(lang?.TranslationUnit)) {
             for (const el of toArr(tu?.TranslationElement)) {
-              const refId = a(el, 'RefId');
+              const refId = attr(el, 'RefId');
               if (!refId) continue;
               for (const t of toArr(el.Translation)) {
-                if (a(t, 'Text')) {
-                  catTrans[refId] = a(t, 'Text');
+                if (attr(t, 'Text')) {
+                  catTrans[refId] = attr(t, 'Text');
                   break;
                 }
               }
@@ -1569,9 +1586,9 @@ function parseKnxproj(buffer, password = null) {
 
         const walkSections = (sections, parentId) => {
           for (const sec of toArr(sections)) {
-            const secId = a(sec, 'Id');
-            const secName = ct(secId) || a(sec, 'Name') || '';
-            const secNumber = a(sec, 'Number') || '';
+            const secId = attr(sec, 'Id');
+            const secName = ct(secId) || attr(sec, 'Name') || '';
+            const secNumber = attr(sec, 'Number') || '';
             catalogSections.push({
               id: secId,
               name: secName,
@@ -1582,23 +1599,23 @@ function parseKnxproj(buffer, password = null) {
             });
             // Items directly in this section
             for (const item of toArr(sec.CatalogItem)) {
-              const itemId = a(item, 'Id');
-              const prodRef = a(item, 'ProductRefId') || '';
-              const h2pRef = a(item, 'Hardware2ProgramRefId') || '';
+              const itemId = attr(item, 'Id');
+              const prodRef = attr(item, 'ProductRefId') || '';
+              const h2pRef = attr(item, 'Hardware2ProgramRefId') || '';
               const hw = hwByProd[prodRef] || hwByH2P[h2pRef] || {};
               catalogItems.push({
                 id: itemId,
-                name: ct(itemId) || a(item, 'Name') || hw.model || '',
-                number: a(item, 'Number') || '',
-                description: a(item, 'VisibleDescription') || '',
+                name: ct(itemId) || attr(item, 'Name') || hw.model || '',
+                number: attr(item, 'Number') || '',
+                description: attr(item, 'VisibleDescription') || '',
                 section_id: secId,
                 product_ref: prodRef,
                 h2p_ref: h2pRef,
                 order_number:
-                  hw.orderNumber || a(item, 'VisibleDescription') || '',
+                  hw.orderNumber || attr(item, 'VisibleDescription') || '',
                 manufacturer: mfrName,
                 mfr_id: mfrId,
-                model: hw.model || ct(itemId) || a(item, 'Name') || '',
+                model: hw.model || ct(itemId) || attr(item, 'Name') || '',
                 bus_current: hw.busCurrent || 0,
                 width_mm: hw.widthMm || 0,
                 is_power_supply: hw.isPowerSupply || false,
@@ -1694,16 +1711,16 @@ function parseKnxproj(buffer, password = null) {
         if (looksEncrypted(projBuf)) projBuf = decryptEntry(projBuf, password);
         const px = xmlParser.parse(projBuf.toString('utf8'));
         const pi = px?.KNX?.Project?.ProjectInformation;
-        if (a(pi, 'Name')) projectName = a(pi, 'Name');
+        if (attr(pi, 'Name')) projectName = attr(pi, 'Name');
         if (pi) {
           projectInfo = {
-            lastModified: a(pi, 'LastModified') || '',
-            projectStart: a(pi, 'ProjectStart') || '',
-            archivedVersion: a(pi, 'ArchivedVersion') || '',
-            comment: a(pi, 'Comment') || '',
-            completionStatus: a(pi, 'CompletionStatus') || '',
-            groupAddressStyle: a(pi, 'GroupAddressStyle') || '',
-            guid: a(pi, 'Guid') || '',
+            lastModified: attr(pi, 'LastModified') || '',
+            projectStart: attr(pi, 'ProjectStart') || '',
+            archivedVersion: attr(pi, 'ArchivedVersion') || '',
+            comment: attr(pi, 'Comment') || '',
+            completionStatus: attr(pi, 'CompletionStatus') || '',
+            groupAddressStyle: attr(pi, 'GroupAddressStyle') || '',
+            guid: attr(pi, 'Guid') || '',
           };
         }
       } catch (_) {}
@@ -1738,23 +1755,23 @@ function parseKnxproj(buffer, password = null) {
     for (const mainGR of toArr(
       installation.GroupAddresses?.GroupRanges?.GroupRange,
     )) {
-      const mainName = a(mainGR, 'Name');
+      const mainName = attr(mainGR, 'Name');
       for (const midGR of toArr(mainGR.GroupRange)) {
-        const midName = a(midGR, 'Name');
+        const midName = attr(midGR, 'Name');
         for (const ga of toArr(midGR.GroupAddress)) {
-          const flat = parseInt(a(ga, 'Address'));
+          const flat = parseInt(attr(ga, 'Address'));
           const mainNum = (flat >> 11) & 0x1f;
           const midNum = (flat >> 8) & 0x07;
           const subNum = flat & 0xff;
           const addr = `${mainNum}/${midNum}/${subNum}`;
-          const fullId = a(ga, 'Id');
+          const fullId = attr(ga, 'Id');
           const shortId = fullId.split('_').slice(-1)[0]; // "GA-3"
           groupAddresses.push({
             address: addr,
-            name: a(ga, 'Name') || addr,
-            dpt: a(ga, 'DatapointType'),
-            comment: a(ga, 'Comment') || '',
-            description: a(ga, 'Description') || '',
+            name: attr(ga, 'Name') || addr,
+            dpt: attr(ga, 'DatapointType'),
+            comment: attr(ga, 'Comment') || '',
+            description: attr(ga, 'Description') || '',
             main: mainNum,
             mainGroupName: mainName,
             middle: midNum,
@@ -1776,8 +1793,8 @@ function parseKnxproj(buffer, password = null) {
     const devInstById = {}; // DeviceInstance @Id → individual_address
 
     for (const area of toArr(topology.Area)) {
-      const areaNum = parseInt(a(area, 'Address')) || 0;
-      const areaName = a(area, 'Name');
+      const areaNum = parseInt(attr(area, 'Address')) || 0;
+      const areaName = attr(area, 'Name');
       topologyEntries.push({
         area: areaNum,
         line: null,
@@ -1785,12 +1802,12 @@ function parseKnxproj(buffer, password = null) {
         medium: 'TP',
       });
       for (const line of toArr(area.Line)) {
-        const lineNum = parseInt(a(line, 'Address')) || 0;
-        const lineName = a(line, 'Name');
+        const lineNum = parseInt(attr(line, 'Address')) || 0;
+        const lineName = attr(line, 'Name');
         const mediumAttr =
-          a(line, 'MediumTypeRefId') ||
-          a(line, 'Medium') ||
-          a(line, 'DomainAddress') ||
+          attr(line, 'MediumTypeRefId') ||
+          attr(line, 'Medium') ||
+          attr(line, 'DomainAddress') ||
           '';
         const mediumFromName = (() => {
           const n = lineName.toUpperCase();
@@ -1813,15 +1830,15 @@ function parseKnxproj(buffer, password = null) {
         ];
 
         for (const dev of allDevs) {
-          const devNum = parseInt(a(dev, 'Address')) || 0;
+          const devNum = parseInt(attr(dev, 'Address')) || 0;
           const ia = `${areaNum}.${lineNum}.${devNum}`;
-          const prodRef = a(dev, 'ProductRefId');
-          const h2pRef = a(dev, 'Hardware2ProgramRefId');
+          const prodRef = attr(dev, 'ProductRefId');
+          const h2pRef = attr(dev, 'Hardware2ProgramRefId');
           const hw = hwByProd[prodRef] || hwByH2P[h2pRef] || {};
           const appIdx = getAppIdx(h2pRef);
 
           // Serial: ETS stores as base64 — decode to hex
-          let serial = a(dev, 'SerialNumber') || hw.hwSerial || '';
+          let serial = attr(dev, 'SerialNumber') || hw.hwSerial || '';
           if (serial && !/^[0-9A-Fa-f]{8,}$/.test(serial)) {
             try {
               serial = Buffer.from(serial, 'base64')
@@ -1832,10 +1849,10 @@ function parseKnxproj(buffer, password = null) {
 
           // Name: user-given name in ETS, else fall back to model
           const devName =
-            a(dev, 'Name') || a(dev, 'Description') || hw.model || ia;
+            attr(dev, 'Name') || attr(dev, 'Description') || hw.model || ia;
 
           // Track DeviceInstance Id so Locations can link back to this device
-          const devInstId = a(dev, 'Id');
+          const devInstId = attr(dev, 'Id');
           if (devInstId) devInstById[devInstId] = ia;
 
           // ── Parameters ─────────────────────────────────────────────────────
@@ -1850,8 +1867,8 @@ function parseKnxproj(buffer, password = null) {
           const seenModInstances = new Set();
 
           for (const pir of pirEls) {
-            const refId = a(pir, 'RefId');
-            const value = a(pir, 'Value');
+            const refId = attr(pir, 'RefId');
+            const value = attr(pir, 'Value');
             if (!refId) continue;
             instanceValues.set(refId, value);
             const sk = refId.replace(/_M-\d+_MI-\d+/g, '');
@@ -1924,9 +1941,9 @@ function parseKnxproj(buffer, password = null) {
           devices.push({
             individual_address: ia,
             name: devName,
-            description: a(dev, 'Description') || '',
-            comment: a(dev, 'Comment') || '',
-            installation_hints: a(dev, 'InstallationHints') || '',
+            description: attr(dev, 'Description') || '',
+            comment: attr(dev, 'Comment') || '',
+            installation_hints: attr(dev, 'InstallationHints') || '',
             manufacturer: hw.manufacturer || '',
             model: hw.model || '',
             order_number: hw.orderNumber || '',
@@ -1938,14 +1955,14 @@ function parseKnxproj(buffer, password = null) {
             line_name: lineName,
             medium,
             device_type: inferType(devName, prodRef, hw.model || '', hw),
-            status: a(dev, 'LastDownload') ? 'programmed' : 'unassigned',
-            last_modified: a(dev, 'LastModified'),
-            last_download: a(dev, 'LastDownload'),
-            apdu_length: a(dev, 'LastUsedAPDULength') || '',
-            app_loaded: a(dev, 'ApplicationProgramLoaded') === 'true',
-            comm_loaded: a(dev, 'CommunicationPartLoaded') === 'true',
-            ia_loaded: a(dev, 'IndividualAddressLoaded') === 'true',
-            params_loaded: a(dev, 'ParametersLoaded') === 'true',
+            status: attr(dev, 'LastDownload') ? 'programmed' : 'unassigned',
+            last_modified: attr(dev, 'LastModified'),
+            last_download: attr(dev, 'LastDownload'),
+            apdu_length: attr(dev, 'LastUsedAPDULength') || '',
+            app_loaded: attr(dev, 'ApplicationProgramLoaded') === 'true',
+            comm_loaded: attr(dev, 'CommunicationPartLoaded') === 'true',
+            ia_loaded: attr(dev, 'IndividualAddressLoaded') === 'true',
+            params_loaded: attr(dev, 'ParametersLoaded') === 'true',
             app_number: '',
             app_version: '',
             parameters,
@@ -1963,17 +1980,17 @@ function parseKnxproj(buffer, password = null) {
           for (const cor of toArr(
             dev.ComObjectInstanceRefs?.ComObjectInstanceRef,
           )) {
-            const refId = a(cor, 'RefId');
-            const channelId = a(cor, 'ChannelId');
-            const linksAttr = a(cor, 'Links');
+            const refId = attr(cor, 'RefId');
+            const channelId = attr(cor, 'ChannelId');
+            const linksAttr = attr(cor, 'Links');
 
             // Skip direction-label Text on instance refs — these are generic placeholders, not user-given names
             const DIRECTION_RE =
               /^(input|output|input\/output|in|out|eingang|ausgang|ein\/ausgang|ein|aus|entrée|sortie|entrée\/sortie|ingresso|uscita|ingresso\/uscita|entrada|salida|entrada\/salida)$/i;
-            let name = DIRECTION_RE.test(a(cor, 'Text'))
+            let name = DIRECTION_RE.test(attr(cor, 'Text'))
               ? ''
-              : a(cor, 'Text') || '';
-            let dpt = a(cor, 'DatapointType') || '';
+              : attr(cor, 'Text') || '';
+            let dpt = attr(cor, 'DatapointType') || '';
             let function_text = '';
             let objectSize = '';
             let channel = '';
@@ -2017,7 +2034,7 @@ function parseKnxproj(buffer, password = null) {
               }
             }
 
-            const updateFlag = a(cor, 'UpdateFlag') === 'Enabled';
+            const updateFlag = attr(cor, 'UpdateFlag') === 'Enabled';
             const flags = buildFlags({ read, write, comm, tx, u: updateFlag });
             const coObj = {
               device_address: ia,
@@ -2067,11 +2084,11 @@ function parseKnxproj(buffer, password = null) {
 
             // Legacy nested Connectors: explicit per-GA direction
             for (const conn of toArr(cor.Connectors?.Send)) {
-              const gaAddr = resolveGA(a(conn, 'GroupAddressRefId'));
+              const gaAddr = resolveGA(attr(conn, 'GroupAddressRefId'));
               if (gaAddr) addGA(gaAddr, true, false);
             }
             for (const conn of toArr(cor.Connectors?.Receive)) {
-              const gaAddr = resolveGA(a(conn, 'GroupAddressRefId'));
+              const gaAddr = resolveGA(attr(conn, 'GroupAddressRefId'));
               if (gaAddr) addGA(gaAddr, false, true);
             }
 
@@ -2091,9 +2108,9 @@ function parseKnxproj(buffer, password = null) {
             const linkedObjNums = new Set(
               toArr(dev.ComObjectInstanceRefs?.ComObjectInstanceRef)
                 .map((cor) => {
-                  const refId = a(cor, 'RefId');
+                  const refId = attr(cor, 'RefId');
                   if (!refId) return null;
-                  const r = appIdx.resolveCoRef(refId, a(cor, 'ChannelId'));
+                  const r = appIdx.resolveCoRef(refId, attr(cor, 'ChannelId'));
                   return r ? r.objectNumber : null;
                 })
                 .filter((n) => n != null),
@@ -2234,6 +2251,6 @@ module.exports = {
   looksEncrypted,
   inferType,
   buildFlags,
-  clean,
-  interp,
+  sanitizeText,
+  interpolate,
 };

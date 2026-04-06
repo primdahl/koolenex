@@ -6,7 +6,7 @@ const path = require('path');
 
 const {
   toArr,
-  makeTracker,
+  makeUpdateBuilder,
   getDptInfo,
   parseMasterXml,
   saveMasterXml,
@@ -64,23 +64,23 @@ describe('toArr', () => {
   });
 });
 
-// ── makeTracker ────────────────────────────────────────────────────────────────
+// ── makeUpdateBuilder ────────────────────────────────────────────────────────────────
 
-describe('makeTracker', () => {
+describe('makeUpdateBuilder', () => {
   it('track() adds column=? to sets', () => {
-    const { track, sets } = makeTracker({ name: 'old' });
+    const { track, sets } = makeUpdateBuilder({ name: 'old' });
     track('name', 'new');
     assert.deepEqual(sets, ['name=?']);
   });
 
   it('track() pushes value to vals', () => {
-    const { track, vals } = makeTracker({ name: 'old' });
+    const { track, vals } = makeUpdateBuilder({ name: 'old' });
     track('name', 'new');
     assert.deepEqual(vals, ['new']);
   });
 
   it('track() records old→new diff string', () => {
-    const { track, diffs } = makeTracker({ name: 'old' });
+    const { track, diffs } = makeUpdateBuilder({ name: 'old' });
     track('name', 'new');
     assert.equal(diffs.length, 1);
     assert.match(diffs[0], /name/);
@@ -89,7 +89,7 @@ describe('makeTracker', () => {
   });
 
   it('multiple track() calls accumulate correctly', () => {
-    const { track, sets, vals, diffs } = makeTracker({ a: '1', b: '2' });
+    const { track, sets, vals, diffs } = makeUpdateBuilder({ a: '1', b: '2' });
     track('a', '10');
     track('b', '20');
     assert.deepEqual(sets, ['a=?', 'b=?']);
@@ -98,7 +98,7 @@ describe('makeTracker', () => {
   });
 
   it('old values of undefined show as empty string in diffs', () => {
-    const { track, diffs } = makeTracker({});
+    const { track, diffs } = makeUpdateBuilder({});
     track('missing', 'val');
     assert.match(diffs[0], /"" →/);
   });

@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const db = require('../db');
-const { makeTracker } = require('./shared');
+const { makeUpdateBuilder } = require('./shared');
 
 const router = express.Router();
 
@@ -99,7 +99,7 @@ router.put('/projects/:pid/gas/:gid', (req, res) => {
     [+gid, +pid],
   );
   if (!oldGA) return res.status(404).json({ error: 'Not found' });
-  const { track, sets, vals, diffs } = makeTracker(oldGA);
+  const { track, sets, vals, diffs } = makeUpdateBuilder(oldGA);
   if (b.name !== undefined) track('name', b.name.trim());
   if (b.dpt !== undefined) track('dpt', b.dpt);
   if (b.description !== undefined) track('description', b.description);

@@ -50,12 +50,12 @@ function isDemoProjectActive() {
   return proj && proj.name.includes('Demo');
 }
 
-function remapTelegram(tg) {
-  if ((!_demoDevMap && !_demoGaMap) || !isDemoProjectActive()) return tg;
+function remapTelegram(telegram) {
+  if ((!_demoDevMap && !_demoGaMap) || !isDemoProjectActive()) return telegram;
   return {
-    ...tg,
-    src: (_demoDevMap && _demoDevMap[tg.src]) || tg.src,
-    dst: (_demoGaMap && _demoGaMap[tg.dst]) || tg.dst,
+    ...telegram,
+    src: (_demoDevMap && _demoDevMap[telegram.src]) || telegram.src,
+    dst: (_demoGaMap && _demoGaMap[telegram.dst]) || telegram.dst,
   };
 }
 
@@ -66,7 +66,7 @@ function rebuildReverseMaps() {
 }
 
 /** Map a demo GA back to the real bus GA for sending */
-function unremap(demoAddr) {
+function demoToReal(demoAddr) {
   if (!_demoGaMapRev || !isDemoProjectActive()) return demoAddr;
   return _demoGaMapRev[demoAddr] || demoAddr;
 }
@@ -247,44 +247,44 @@ function decodeRawValue(rawHex, dptKey, info) {
   return null;
 }
 
-function refineDecode(tg) {
-  if (!tg.projectId || !tg.dst?.includes('/') || !tg.raw_value) return tg;
+function decodeTelegram(telegram) {
+  if (!telegram.projectId || !telegram.dst?.includes('/') || !telegram.raw_value) return telegram;
 
   const ga = db.get(
     'SELECT dpt FROM group_addresses WHERE project_id=? AND address=?',
-    [tg.projectId, tg.dst],
+    [telegram.projectId, telegram.dst],
   );
-  if (!ga?.dpt) return tg;
+  if (!ga?.dpt) return telegram;
 
   const key = normalizeDptKey(ga.dpt);
-  if (!key) return tg;
-  const info = getDptInfo(tg.projectId)[key];
-  const decoded = decodeRawValue(tg.raw_value, key, info);
-  return decoded != null ? { ...tg, decoded } : tg;
+  if (!key) return telegram;
+  const info = getDptInfo(telegram.projectId)[key];
+  const decoded = decodeRawValue(telegram.raw_value, key, info);
+  return decoded != null ? { ...telegram, decoded } : telegram;
 }
 
 // Bus event wiring — deferred until setBus() is called
 function wireBusEvents() {
   if (!bus) return;
-  bus.setRemapper((tg) => refineDecode(remapTelegram(tg)));
+  bus.setRemapper((telegram) => decodeTelegram(remapTelegram(telegram)));
   setTimeout(() => {
     try {
       rebuildDemoMap();
     } catch (_) {}
   }, 0);
-  bus.on('telegram', (tg) => {
-    if (!tg.projectId) return;
+  bus.on('telegram', (telegram) => {
+    if (!telegram.projectId) return;
     try {
       db.run(
         'INSERT INTO bus_telegrams (project_id,src,dst,type,raw_value,decoded,priority) VALUES (?,?,?,?,?,?,?)',
         [
-          tg.projectId,
-          tg.src,
-          tg.dst,
-          tg.type,
-          tg.raw_value,
-          tg.decoded,
-          tg.priority || 'low',
+          telegram.projectId,
+          telegram.src,
+          telegram.dst,
+          telegram.type,
+          telegram.raw_value,
+          telegram.decoded,
+          telegram.priority || 'low',
         ],
       );
       db.scheduleSave(500);
@@ -356,7 +356,7 @@ router.post('/bus/write', (req, res) => {
   const { ga, value, dpt, projectId } = req.body;
   if (!ga) return res.status(400).json({ error: 'ga required' });
   try {
-    const busGa = unremap(ga); // demo GA -> real bus GA
+    const busGa = demoToReal(ga); // demo GA -> real bus GA
     const result = bus.write(busGa, value, dpt);
     if (projectId) {
       db.run(

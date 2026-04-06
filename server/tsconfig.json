@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "node16",
+    "rootDir": "..",
+    "paths": {
+      "#shared/*": ["../shared/*"]
+    }
+  },
+  "include": ["**/*.ts", "../shared/**/*.ts"],
+  "exclude": ["node_modules"]
+}

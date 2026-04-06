@@ -284,7 +284,7 @@ router.post('/projects/import', upload.single('file'), (req, res) => {
       return res
         .status(422)
         .json({ error: 'Incorrect password', code: 'PASSWORD_INCORRECT' });
-    console.error('ETS parse error:', err);
+    console.error('ETS parse error:', err.message);
     return res.status(422).json({ error: `Parse failed: ${err.message}` });
   }
 
@@ -369,7 +369,7 @@ router.post('/projects/:id/reimport', upload.single('file'), (req, res) => {
       return res
         .status(422)
         .json({ error: 'Incorrect password', code: 'PASSWORD_INCORRECT' });
-    console.error('ETS reimport parse error:', err);
+    console.error('ETS reimport parse error:', err.message);
     return res.status(422).json({ error: `Parse failed: ${err.message}` });
   }
 
