@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const db = require('../db');
+const db = require('../db.ts');
 const { DATA_DIR, APPS_DIR, makeUpdateBuilder } = require('./shared');
 
 const router = express.Router();

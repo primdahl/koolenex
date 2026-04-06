@@ -12,20 +12,12 @@ describe('sanitizeText()', () => {
   test('decodes hex numeric character references', () => {
     assert.equal(sanitizeText('&#x2019;'), '\u2019');
     assert.equal(sanitizeText('&#x26;'), '&');
-    assert.equal(
-      sanitizeText('a&#x20;b'),
-      'a b',
-      'space entity between chars',
-    );
+    assert.equal(sanitizeText('a&#x20;b'), 'a b', 'space entity between chars');
   });
 
   test('decodes decimal numeric character references', () => {
     assert.equal(sanitizeText('&#8217;'), '\u2019');
-    assert.equal(
-      sanitizeText('a&#32;b'),
-      'a b',
-      'space entity between chars',
-    );
+    assert.equal(sanitizeText('a&#32;b'), 'a b', 'space entity between chars');
   });
 
   test('strips ASCII control characters (0x00-0x1F, 0x7F)', () => {

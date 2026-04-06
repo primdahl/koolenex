@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const multer = require('multer');
-const db = require('../db');
+const db = require('../db.ts');
 const { parseKnxproj } = require('../ets-parser');
 const { saveModelsAndMasterXml } = require('./shared');
 

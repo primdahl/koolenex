@@ -2,7 +2,7 @@
 const { describe, it, before } = require('node:test');
 const assert = require('node:assert/strict');
 
-const db = require('../server/db');
+const db = require('../server/db.ts');
 
 before(async () => {
   await db.init();

@@ -1,4 +1,3 @@
-'use strict';
 /**
  * Database layer using sql.js (pure JavaScript SQLite — no native compilation).
  *
@@ -6,25 +5,40 @@
  * .db file after every mutating operation. On startup we load from disk if it exists.
  */
 
-const initSqlJs = require('sql.js');
-const path = require('path');
-const fs = require('fs');
+import initSqlJs from 'sql.js';
+import type { SqlJsDatabase, SqlJsStatic } from 'sql.js';
+import path from 'path';
+import fs from 'fs';
+import type {
+  ComObjectWithDevice,
+  GAMaps,
+  GaGroupName,
+  NormalisedGA,
+  ProjectFull,
+  RunResult,
+} from '../shared/types.ts';
 
-const DB_PATH = path.join(__dirname, '..', 'koolenex.db');
+const DB_PATH = path.join(process.cwd(), 'koolenex.db');
 
-let SQL = null; // sql.js module
-let db = null; // Database instance
+let SQL: SqlJsStatic | null = null;
+let db: SqlJsDatabase | null = null;
 
-function buildGAMaps(comObjects) {
-  const deviceGAMap = {},
-    gaDeviceMap = {};
+function assertDb(d: SqlJsDatabase | null): asserts d is SqlJsDatabase {
+  if (!d) throw new Error('Database not initialised — call init() first');
+}
+
+export function buildGAMaps(
+  comObjects: Array<{ device_address: string; ga_address: string }>,
+): GAMaps {
+  const deviceGAMap: Record<string, string[]> = {};
+  const gaDeviceMap: Record<string, string[]> = {};
   for (const co of comObjects) {
     const da = co.device_address;
     for (const ga of (co.ga_address || '').split(/\s+/).filter(Boolean)) {
       if (!deviceGAMap[da]) deviceGAMap[da] = [];
-      if (!deviceGAMap[da].includes(ga)) deviceGAMap[da].push(ga);
+      if (!deviceGAMap[da]!.includes(ga)) deviceGAMap[da]!.push(ga);
       if (!gaDeviceMap[ga]) gaDeviceMap[ga] = [];
-      if (!gaDeviceMap[ga].includes(da)) gaDeviceMap[ga].push(da);
+      if (!gaDeviceMap[ga]!.includes(da)) gaDeviceMap[ga]!.push(da);
     }
   }
   return { deviceGAMap, gaDeviceMap };
@@ -32,8 +46,8 @@ function buildGAMaps(comObjects) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-async function init() {
-  SQL = await initSqlJs();
+export async function init(): Promise<void> {
+  SQL = (await initSqlJs()) as SqlJsStatic;
 
   if (fs.existsSync(DB_PATH)) {
     const buf = fs.readFileSync(DB_PATH);
@@ -164,12 +178,12 @@ async function init() {
 
   // ── Migrations: add columns introduced after initial schema ──────────────
   // SQLite has no ADD COLUMN IF NOT EXISTS, so we check pragma first.
-  const migrate = (table, col, def) => {
+  const migrate = (table: string, col: string, def: string): void => {
     try {
-      const cols = db.exec(`PRAGMA table_info(${table})`)[0];
+      const cols = db!.exec(`PRAGMA table_info(${table})`)[0];
       if (!cols) return;
-      const exists = cols.values.some((row) => row[1] === col);
-      if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+      const exists = cols.values.some((row: unknown[]) => row[1] === col);
+      if (!exists) db!.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
     } catch (_) {}
   };
   migrate('devices', 'comment', "TEXT DEFAULT ''");
@@ -225,10 +239,16 @@ async function init() {
 
   // Migrate existing area/line data from devices into topology table
   try {
-    const hasRows = all('SELECT count(*) as c FROM topology').c;
+    const hasRows = (
+      all('SELECT count(*) as c FROM topology')[0] as { c: number } | undefined
+    )?.c;
     if (!hasRows) {
       // Migrate areas
-      const areas = all(
+      const areas = all<{
+        project_id: number;
+        area: number;
+        area_name: string;
+      }>(
         "SELECT DISTINCT project_id, area, area_name FROM devices WHERE area_name != '' AND area_name IS NOT NULL",
       );
       for (const r of areas) {
@@ -240,7 +260,13 @@ async function init() {
         } catch (_) {}
       }
       // Migrate lines
-      const lines = all(
+      const lines = all<{
+        project_id: number;
+        area: number;
+        line: number;
+        line_name: string;
+        medium: string;
+      }>(
         'SELECT DISTINCT project_id, area, line, line_name, medium FROM devices',
       );
       for (const r of lines) {
@@ -305,10 +331,14 @@ async function init() {
   try {
     const cols = db.exec('PRAGMA table_info(group_addresses)')[0];
     const hasMainGN =
-      cols && cols.values.some((r) => r[1] === 'main_group_name');
+      cols && cols.values.some((r: unknown[]) => r[1] === 'main_group_name');
     if (hasMainGN) {
       // Migrate main group names
-      const mains = all(
+      const mains = all<{
+        project_id: number;
+        main_g: number;
+        main_group_name: string;
+      }>(
         "SELECT DISTINCT project_id, main_g, main_group_name FROM group_addresses WHERE main_group_name != ''",
       );
       for (const r of mains) {
@@ -318,7 +348,12 @@ async function init() {
         );
       }
       // Migrate middle group names
-      const mids = all(
+      const mids = all<{
+        project_id: number;
+        main_g: number;
+        middle_g: number;
+        middle_group_name: string;
+      }>(
         "SELECT DISTINCT project_id, main_g, middle_g, middle_group_name FROM group_addresses WHERE middle_group_name != ''",
       );
       for (const r of mids) {
@@ -350,7 +385,8 @@ async function init() {
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
-function save() {
+export function save(): void {
+  assertDb(db);
   const data = db.export(); // Uint8Array
   fs.writeFile(DB_PATH, Buffer.from(data), (err) => {
     if (err) console.error('[DB] save error:', err.message);
@@ -358,8 +394,8 @@ function save() {
 }
 
 // Debounced save — avoids hammering disk during bulk imports
-let saveTimer = null;
-function scheduleSave(delayMs = 200) {
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+export function scheduleSave(delayMs = 200): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     save();
@@ -369,45 +405,49 @@ function scheduleSave(delayMs = 200) {
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
 
-/**
- * Run a SELECT and return array of plain objects.
- */
-function all(sql, params = []) {
+export function all<T = Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = [],
+): T[] {
+  assertDb(db);
   const stmt = db.prepare(sql);
   stmt.bind(params);
-  const rows = [];
+  const rows: T[] = [];
   while (stmt.step()) {
-    rows.push(stmt.getAsObject());
+    rows.push(stmt.getAsObject() as T);
   }
   stmt.free();
   return rows;
 }
 
-/**
- * Run a SELECT and return the first row as a plain object, or null.
- */
-function get(sql, params = []) {
-  const rows = all(sql, params);
-  return rows[0] || null;
+export function get<T = Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = [],
+): T | null {
+  const rows = all<T>(sql, params);
+  return rows[0] ?? null;
 }
 
-/**
- * Run an INSERT/UPDATE/DELETE. Returns { lastInsertRowid, changes }.
- */
-function run(sql, params = []) {
+export function run(sql: string, params: unknown[] = []): RunResult {
+  assertDb(db);
   db.run(sql, params);
   const lastInsertRowid =
-    db.exec('SELECT last_insert_rowid() as id')[0]?.values[0][0] ?? null;
-  const changes = db.exec('SELECT changes() as c')[0]?.values[0][0] ?? 0;
+    (db.exec('SELECT last_insert_rowid() as id')[0]?.values[0]?.[0] as
+      | number
+      | null) ?? null;
+  const changes =
+    (db.exec('SELECT changes() as c')[0]?.values[0]?.[0] as number) ?? 0;
   return { lastInsertRowid, changes };
 }
 
-/**
- * Run multiple statements in a transaction.
- * fn receives { all, get, run } and should not call save().
- * After fn returns, the db is saved once.
- */
-function transaction(fn) {
+export interface TransactionHelpers {
+  all: typeof all;
+  get: typeof get;
+  run: typeof run;
+}
+
+export function transaction<T>(fn: (helpers: TransactionHelpers) => T): T {
+  assertDb(db);
   db.run('BEGIN');
   try {
     const result = fn({ all, get, run });
@@ -422,7 +462,7 @@ function transaction(fn) {
 
 // ── Higher-level helpers ──────────────────────────────────────────────────────
 
-function getProjectFull(projectId) {
+export function getProjectFull(projectId: number): ProjectFull | null {
   const project = get('SELECT * FROM projects WHERE id=?', [projectId]);
   if (!project) return null;
 
@@ -434,7 +474,7 @@ function getProjectFull(projectId) {
     'SELECT * FROM group_addresses WHERE project_id=? ORDER BY main_g, middle_g, sub_g',
     [projectId],
   );
-  const comObjects = all(
+  const comObjects = all<ComObjectWithDevice>(
     `
     SELECT co.*, d.individual_address as device_address, d.name as device_name
     FROM com_objects co JOIN devices d ON co.device_id=d.id
@@ -445,30 +485,30 @@ function getProjectFull(projectId) {
   const { deviceGAMap, gaDeviceMap } = buildGAMaps(comObjects);
 
   // Build group-name lookup from ga_group_names table
-  const groupNames = all(
+  const groupNames = all<GaGroupName>(
     'SELECT main_g, middle_g, name FROM ga_group_names WHERE project_id=?',
     [projectId],
   );
-  const mainNameMap = {}; // main_g → name
-  const midNameMap = {}; // "main_g/middle_g" → name
+  const mainNameMap: Record<number, string> = {};
+  const midNameMap: Record<string, string> = {};
   for (const gn of groupNames) {
     if (gn.middle_g === -1) mainNameMap[gn.main_g] = gn.name;
     else midNameMap[`${gn.main_g}/${gn.middle_g}`] = gn.name;
   }
 
   // Normalise column names for GAs
-  const normGas = gas.map((g) => {
-    const main = g.main_g ?? g.main ?? 0;
-    const middle = g.middle_g ?? g.middle ?? 0;
+  const normGas: NormalisedGA[] = gas.map((g: Record<string, unknown>) => {
+    const main = (g.main_g ?? g.main ?? 0) as number;
+    const middle = (g.middle_g ?? g.middle ?? 0) as number;
     return {
       ...g,
       main,
       middle,
-      sub: g.sub_g ?? g.sub ?? 0,
-      main_group_name: mainNameMap[main] || '',
-      middle_group_name: midNameMap[`${main}/${middle}`] || '',
-      devices: gaDeviceMap[g.address] || [],
-    };
+      sub: (g.sub_g ?? g.sub ?? 0) as number,
+      main_group_name: mainNameMap[main] ?? '',
+      middle_group_name: midNameMap[`${main}/${middle}`] ?? '',
+      devices: gaDeviceMap[g.address as string] ?? [],
+    } as NormalisedGA;
   });
 
   const spaces = all('SELECT * FROM spaces WHERE project_id=? ORDER BY id', [
@@ -480,18 +520,23 @@ function getProjectFull(projectId) {
     [projectId],
   );
   // Build lookup for area/line names
-  const areaNameMap = {}; // area → name
-  const lineNameMap = {}; // "area.line" → { name, medium }
+  const areaNameMap: Record<number, string> = {};
+  const lineNameMap: Record<string, { name: string; medium: string }> = {};
   for (const t of topoRows) {
-    if (t.line === null) areaNameMap[t.area] = t.name;
+    const row = t as Record<string, unknown>;
+    if (row.line === null) areaNameMap[row.area as number] = row.name as string;
     else
-      lineNameMap[`${t.area}.${t.line}`] = { name: t.name, medium: t.medium };
+      lineNameMap[`${row.area}.${row.line}`] = {
+        name: row.name as string,
+        medium: row.medium as string,
+      };
   }
   // Attach topology names to devices
-  const devicesWithTopo = devices.map((d) => ({
+  const devicesWithTopo = devices.map((d: Record<string, unknown>) => ({
     ...d,
-    area_name: areaNameMap[d.area] || d.area_name || '',
-    line_name: lineNameMap[`${d.area}.${d.line}`]?.name || d.line_name || '',
+    area_name: areaNameMap[d.area as number] ?? (d.area_name as string) ?? '',
+    line_name:
+      lineNameMap[`${d.area}.${d.line}`]?.name ?? (d.line_name as string) ?? '',
   }));
 
   return {
@@ -503,36 +548,23 @@ function getProjectFull(projectId) {
     gaDeviceMap,
     spaces,
     topology: topoRows,
-  };
+  } as unknown as ProjectFull;
 }
 
-/**
- * Record an audit log entry.
- * @param {number} projectId
- * @param {string} action   - e.g. 'create', 'update', 'delete', 'import'
- * @param {string} entity   - e.g. 'device', 'group_address', 'com_object', 'project', 'param_values'
- * @param {string} entityId - human-readable identifier (address, name, etc.)
- * @param {string} detail   - free-text description of what changed
- */
-function audit(projectId, action, entity, entityId, detail) {
+export function audit(
+  projectId: number,
+  action: string,
+  entity: string,
+  entityId?: string,
+  detail?: string,
+): void {
+  assertDb(db);
   try {
     db.run(
       'INSERT INTO audit_log (project_id, action, entity, entity_id, detail) VALUES (?,?,?,?,?)',
-      [projectId, action, entity, entityId || '', detail || ''],
+      [projectId, action, entity, entityId ?? '', detail ?? ''],
     );
   } catch (_) {
     /* never let audit logging break the main operation */
   }
 }
-
-module.exports = {
-  init,
-  save,
-  scheduleSave,
-  all,
-  get,
-  run,
-  transaction,
-  getProjectFull,
-  audit,
-};

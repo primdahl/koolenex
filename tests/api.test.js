@@ -26,7 +26,7 @@ async function req(method, urlPath, body) {
 }
 
 before(async () => {
-  db = require('../server/db');
+  db = require('../server/db.ts');
   await db.init();
   const routes = require('../server/routes');
   const app = express();

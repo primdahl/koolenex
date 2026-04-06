@@ -5,7 +5,7 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const fs = require('fs');
-const db = require('./db');
+const db = require('./db.ts');
 const KnxBusManager = require('./knx-bus');
 const bus = new KnxBusManager();
 

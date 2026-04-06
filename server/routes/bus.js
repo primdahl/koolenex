@@ -2,7 +2,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const db = require('../db');
+const db = require('../db.ts');
 const { APPS_DIR, getDptInfo } = require('./shared');
 const {
   buildGATable,
@@ -248,7 +248,12 @@ function decodeRawValue(rawHex, dptKey, info) {
 }
 
 function decodeTelegram(telegram) {
-  if (!telegram.projectId || !telegram.dst?.includes('/') || !telegram.raw_value) return telegram;
+  if (
+    !telegram.projectId ||
+    !telegram.dst?.includes('/') ||
+    !telegram.raw_value
+  )
+    return telegram;
 
   const ga = db.get(
     'SELECT dpt FROM group_addresses WHERE project_id=? AND address=?',
