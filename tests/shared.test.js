@@ -14,7 +14,7 @@ const {
   saveModelsAndMasterXml,
   DATA_DIR,
   APPS_DIR,
-} = require('../server/routes/shared');
+} = require('../server/routes/shared.ts');
 
 const uid = `test_shared_${Date.now()}`;
 

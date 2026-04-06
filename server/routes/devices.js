@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const db = require('../db.ts');
-const { DATA_DIR, APPS_DIR, makeUpdateBuilder } = require('./shared');
+const { DATA_DIR, APPS_DIR, makeUpdateBuilder } = require('./shared.ts');
 
 const router = express.Router();
 const upload = multer({

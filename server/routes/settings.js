@@ -11,7 +11,7 @@ const {
   _translationCache,
   _mediumTypeCache,
   _maskVersionCache,
-} = require('./shared');
+} = require('./shared.ts');
 
 const router = express.Router();
 

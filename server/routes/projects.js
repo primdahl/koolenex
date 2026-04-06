@@ -3,7 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const db = require('../db.ts');
 const { parseKnxproj } = require('../ets-parser');
-const { saveModelsAndMasterXml } = require('./shared');
+const { saveModelsAndMasterXml } = require('./shared.ts');
 
 const router = express.Router();
 const upload = multer({

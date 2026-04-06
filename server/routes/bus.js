@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const db = require('../db.ts');
-const { APPS_DIR, getDptInfo } = require('./shared');
+const { APPS_DIR, getDptInfo } = require('./shared.ts');
 const {
   buildGATable,
   buildAssocTable,

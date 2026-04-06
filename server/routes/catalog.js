@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const db = require('../db.ts');
 const { parseKnxproj } = require('../ets-parser');
-const { APPS_DIR } = require('./shared');
+const { APPS_DIR } = require('./shared.ts');
 
 const router = express.Router();
 const upload = multer({

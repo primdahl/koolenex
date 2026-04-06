@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const db = require('../db.ts');
-const { makeUpdateBuilder } = require('./shared');
+const { makeUpdateBuilder } = require('./shared.ts');
 
 const router = express.Router();
 
