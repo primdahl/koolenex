@@ -1,21 +1,17 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { createRequire } from 'module';
 import { router as settingsRouter, setRebuildDemoMap } from './settings.ts';
 import { router as catalogRouter } from './catalog.ts';
 import { router as devicesRouter } from './devices.ts';
 import { router as gasRouter } from './gas.ts';
-
-// CJS sub-routers not yet converted to TS — use createRequire for interop
-// @ts-expect-error TS1470: import.meta is valid at runtime under --experimental-strip-types
-const require_ = createRequire(import.meta.url);
-const projectsRouter = require_('./projects') as express.Router;
-const busRouter = require_('./bus') as express.Router & {
-  normalizeDptKey: (key: string) => string;
-  decodeRawValue: (...args: unknown[]) => unknown;
-  rebuildDemoMap: () => void;
-  setBus: (bus: unknown) => void;
-};
+import { router as projectsRouter } from './projects.ts';
+import {
+  router as busRouter,
+  normalizeDptKey,
+  decodeRawValue,
+  rebuildDemoMap,
+  setBus as setBusImpl,
+} from './bus.ts';
 
 import {
   writeKnxFloat16,
@@ -72,16 +68,12 @@ router.use('/', catalogRouter);
 router.use('/', busRouter);
 
 // Wire up the rebuildDemoMap dependency: settings needs to call bus.rebuildDemoMap
-setRebuildDemoMap(busRouter.rebuildDemoMap);
+setRebuildDemoMap(rebuildDemoMap);
 
 // Inject bus instance (called from server/index.js after creating the instance)
 router.setBus = (bus: unknown): void => {
-  busRouter.setBus(bus);
+  setBusImpl(bus as Parameters<typeof setBusImpl>[0]);
 };
-
-// Re-export test helpers so require('../server/routes') still works
-const normalizeDptKey = busRouter.normalizeDptKey;
-const decodeRawValue = busRouter.decodeRawValue;
 
 export {
   router,
