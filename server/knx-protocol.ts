@@ -1,12 +1,11 @@
-'use strict';
 /**
  * KNXnet/IP transport — UDP tunneling to a KNXnet/IP gateway.
  * Extends KnxConnection (shared protocol logic) with UDP-specific transport.
  */
 
-const dgram = require('dgram');
-const os = require('os');
-const { KnxConnection, parseCEMI } = require('./knx-connection');
+import dgram from 'dgram';
+import os from 'os';
+import { KnxConnection, parseCEMI } from './knx-connection.ts';
 
 // ── KNXnet/IP service types ────────────────────────────────────────────────────
 const SVC = {
@@ -18,11 +17,11 @@ const SVC = {
   DISCONNECT_RES: 0x020a,
   TUNNELING_REQ: 0x0420,
   TUNNELING_ACK: 0x0421,
-};
+} as const;
 
 // ── KNXnet/IP packet builders ──────────────────────────────────────────────────
 
-function hdr(svc, totalLen) {
+function hdr(svc: number, totalLen: number): Buffer {
   const b = Buffer.alloc(6);
   b[0] = 0x06;
   b[1] = 0x10;
@@ -31,7 +30,7 @@ function hdr(svc, totalLen) {
   return b;
 }
 
-function hpai(ip, port) {
+function hpai(ip: string, port: number): Buffer {
   const b = Buffer.alloc(8);
   b[0] = 0x08;
   b[1] = 0x01;
@@ -42,13 +41,17 @@ function hpai(ip, port) {
   return b;
 }
 
-function pktConnect(localIp, localPort) {
+function pktConnect(localIp: string, localPort: number): Buffer {
   const h = hpai(localIp, localPort);
   const cri = Buffer.from([0x04, 0x04, 0x02, 0x00]);
   return Buffer.concat([hdr(SVC.CONNECT_REQ, 26), h, h, cri]);
 }
 
-function pktConnState(channelId, localIp, localPort) {
+function pktConnState(
+  channelId: number,
+  localIp: string,
+  localPort: number,
+): Buffer {
   return Buffer.concat([
     hdr(SVC.CONNSTATE_REQ, 16),
     Buffer.from([channelId, 0x00]),
@@ -56,7 +59,11 @@ function pktConnState(channelId, localIp, localPort) {
   ]);
 }
 
-function pktDisconnect(channelId, localIp, localPort) {
+function pktDisconnect(
+  channelId: number,
+  localIp: string,
+  localPort: number,
+): Buffer {
   return Buffer.concat([
     hdr(SVC.DISCONNECT_REQ, 16),
     Buffer.from([channelId, 0x00]),
@@ -64,14 +71,14 @@ function pktDisconnect(channelId, localIp, localPort) {
   ]);
 }
 
-function pktDisconnectRes(channelId) {
+function pktDisconnectRes(channelId: number): Buffer {
   return Buffer.concat([
     hdr(SVC.DISCONNECT_RES, 8),
     Buffer.from([channelId, 0x00]),
   ]);
 }
 
-function pktTunnelingReq(channelId, seq, cemi) {
+function pktTunnelingReq(channelId: number, seq: number, cemi: Buffer): Buffer {
   return Buffer.concat([
     hdr(SVC.TUNNELING_REQ, 10 + cemi.length),
     Buffer.from([0x04, channelId, seq & 0xff, 0x00]),
@@ -79,34 +86,60 @@ function pktTunnelingReq(channelId, seq, cemi) {
   ]);
 }
 
-function pktTunnelingAck(channelId, seq, status = 0x00) {
+function pktTunnelingAck(
+  channelId: number,
+  seq: number,
+  status: number = 0x00,
+): Buffer {
   return Buffer.concat([
     hdr(SVC.TUNNELING_ACK, 10),
     Buffer.from([0x04, channelId, seq & 0xff, status]),
   ]);
 }
 
-function decodePhysicalRaw(buf, off) {
-  const b0 = buf[off],
-    b1 = buf[off + 1];
+function decodePhysicalRaw(buf: Buffer, off: number): string {
+  const b0 = buf[off]!;
+  const b1 = buf[off + 1]!;
   return `${b0 >> 4}.${b0 & 0xf}.${b1}`;
 }
 
 // ── Local IP detection ─────────────────────────────────────────────────────────
 
-function getLocalIp() {
+function getLocalIp(): string {
   const ifaces = os.networkInterfaces();
   for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name]) {
+    for (const iface of ifaces[name]!) {
       if (iface.family === 'IPv4' && !iface.internal) return iface.address;
     }
   }
   return '0.0.0.0';
 }
 
+// ── Pending ACK state ──────────────────────────────────────────────────────────
+
+interface PendingAck {
+  seq: number;
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 // ── KnxIpConnection ────────────────────────────────────────────────────────────
 
-class KnxIpConnection extends KnxConnection {
+class KnxIpConnection extends (KnxConnection as new () => InstanceType<
+  typeof KnxConnection
+>) {
+  socket: dgram.Socket | null;
+  host: string | null;
+  port: number;
+  localIp: string;
+  localPort: number;
+  channelId: number;
+  seqOut: number;
+  seqIn: number;
+  _hbTimer: ReturnType<typeof setInterval> | null;
+  _pendingAck: PendingAck | null;
+
   constructor() {
     super();
     this.socket = null;
@@ -123,23 +156,29 @@ class KnxIpConnection extends KnxConnection {
 
   // ── Connect ─────────────────────────────────────────────────────────────────
 
-  connect(host, port = 3671, timeoutMs = 8000) {
+  connect(
+    host: string,
+    port: number = 3671,
+    timeoutMs: number = 8000,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       this.host = host;
       this.port = port;
       this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
-      this.socket.on('error', (err) => {
+      this.socket.on('error', (err: Error) => {
         if (!this.connected) reject(err);
         else {
           this.connected = false;
           this.emit('error', err);
         }
       });
-      this.socket.on('message', (msg, rinfo) => this._onMsg(msg, rinfo));
+      this.socket.on('message', (msg: Buffer, rinfo: dgram.RemoteInfo) =>
+        this._onMsg(msg, rinfo),
+      );
 
       this.socket.bind(0, () => {
-        this.localPort = this.socket.address().port;
+        this.localPort = this.socket!.address().port;
         this.localIp = getLocalIp();
 
         const timer = setTimeout(
@@ -150,7 +189,7 @@ class KnxIpConnection extends KnxConnection {
           clearTimeout(timer);
           resolve();
         });
-        this.once('_connectFailed', (err) => {
+        this.once('_connectFailed', (err: Error) => {
           clearTimeout(timer);
           reject(err);
         });
@@ -160,13 +199,14 @@ class KnxIpConnection extends KnxConnection {
     });
   }
 
-  _sendRaw(buf) {
-    if (this.socket) this.socket.send(buf, 0, buf.length, this.port, this.host);
+  _sendRaw(buf: Buffer): void {
+    if (this.socket && this.host)
+      this.socket.send(buf, 0, buf.length, this.port, this.host);
   }
 
   // ── Incoming message dispatcher ──────────────────────────────────────────────
 
-  _onMsg(msg, _rinfo) {
+  _onMsg(msg: Buffer, _rinfo: dgram.RemoteInfo): void {
     if (msg.length < 6) return;
     const svc = msg.readUInt16BE(2);
     switch (svc) {
@@ -190,9 +230,9 @@ class KnxIpConnection extends KnxConnection {
     }
   }
 
-  _onConnectRes(msg) {
+  _onConnectRes(msg: Buffer): void {
     if (msg.length < 8) return;
-    const status = msg[7];
+    const status = msg[7]!;
     if (status !== 0x00) {
       this.emit(
         '_connectFailed',
@@ -202,7 +242,7 @@ class KnxIpConnection extends KnxConnection {
       );
       return;
     }
-    this.channelId = msg[6];
+    this.channelId = msg[6]!;
     if (msg.length >= 20) this.localAddr = decodePhysicalRaw(msg, 18);
 
     this.connected = true;
@@ -214,23 +254,23 @@ class KnxIpConnection extends KnxConnection {
     this.emit('_connected');
   }
 
-  _onDisconnectReq(msg) {
+  _onDisconnectReq(msg: Buffer): void {
     this.connected = false;
     this._clearHeartbeat();
-    if (msg.length >= 7) this._sendRaw(pktDisconnectRes(msg[6]));
+    if (msg.length >= 7) this._sendRaw(pktDisconnectRes(msg[6]!));
     this.emit('disconnected');
   }
 
-  _onDisconnectRes() {
+  _onDisconnectRes(): void {
     this.connected = false;
     this._clearHeartbeat();
     this.emit('disconnected');
   }
 
-  _onTunnelingReq(msg) {
+  _onTunnelingReq(msg: Buffer): void {
     if (msg.length < 10) return;
-    const channelId = msg[7];
-    const seq = msg[8];
+    const channelId = msg[7]!;
+    const seq = msg[8]!;
 
     this._sendRaw(pktTunnelingAck(channelId, seq));
 
@@ -242,10 +282,10 @@ class KnxIpConnection extends KnxConnection {
     this._onCEMI(cemi);
   }
 
-  _onTunnelingAck(msg) {
+  _onTunnelingAck(msg: Buffer): void {
     if (msg.length < 10) return;
-    const seq = msg[8];
-    const status = msg[9];
+    const seq = msg[8]!;
+    const status = msg[9]!;
     if (this._pendingAck && this._pendingAck.seq === seq) {
       clearTimeout(this._pendingAck.timer);
       const { resolve, reject } = this._pendingAck;
@@ -257,7 +297,7 @@ class KnxIpConnection extends KnxConnection {
 
   // ── Send CEMI via KNXnet/IP tunneling with ACK wait ───────────────────────────
 
-  sendCEMI(cemi, timeoutMs = 1000) {
+  sendCEMI(cemi: Buffer, timeoutMs: number = 1000): Promise<void> {
     return new Promise((resolve, reject) => {
       const seq = this.seqOut;
       this.seqOut = (this.seqOut + 1) & 0xff;
@@ -275,7 +315,7 @@ class KnxIpConnection extends KnxConnection {
 
   // ── Disconnect ────────────────────────────────────────────────────────────────
 
-  disconnect() {
+  disconnect(): void {
     if (!this.socket) return;
     this._clearHeartbeat();
     if (this.connected) {
@@ -288,20 +328,25 @@ class KnxIpConnection extends KnxConnection {
     this.connected = false;
     setTimeout(() => {
       try {
-        this.socket.close();
+        this.socket?.close();
       } catch (_) {}
       this.socket = null;
     }, 500);
   }
 
-  _clearHeartbeat() {
+  _clearHeartbeat(): void {
     if (this._hbTimer) {
       clearInterval(this._hbTimer);
       this._hbTimer = null;
     }
   }
 
-  status() {
+  status(): {
+    connected: boolean;
+    host: string | null;
+    port: number;
+    hasLib: boolean;
+  } {
     return {
       connected: this.connected,
       host: this.host,
@@ -311,14 +356,14 @@ class KnxIpConnection extends KnxConnection {
   }
 }
 
-module.exports = { KnxConnection: KnxIpConnection };
+export { KnxIpConnection as KnxConnection };
 
 // Export pure helpers for testing
-module.exports._hdr = hdr;
-module.exports._hpai = hpai;
-module.exports._pktConnect = pktConnect;
-module.exports._pktConnState = pktConnState;
-module.exports._pktDisconnect = pktDisconnect;
-module.exports._pktDisconnectRes = pktDisconnectRes;
-module.exports._pktTunnelingReq = pktTunnelingReq;
-module.exports._SVC = SVC;
+export { hdr as _hdr };
+export { hpai as _hpai };
+export { pktConnect as _pktConnect };
+export { pktConnState as _pktConnState };
+export { pktDisconnect as _pktDisconnect };
+export { pktDisconnectRes as _pktDisconnectRes };
+export { pktTunnelingReq as _pktTunnelingReq };
+export { SVC as _SVC };

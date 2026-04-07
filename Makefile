@@ -7,7 +7,7 @@ save-pid = echo $$! > $($(1)_PID)
 .PHONY: server stop-server client stop-client start stop test lint format
 
 server: stop-server
-	@node server/index.js & $(call save-pid,SERVER)
+	@node server/index.ts & $(call save-pid,SERVER)
 
 stop-server:
 	@$(call kill-pid,SERVER)

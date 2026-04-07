@@ -17,7 +17,7 @@ const {
   _pktDisconnectRes: pktDisconnectRes,
   _pktTunnelingReq: pktTunnelingReq,
   _SVC: SVC,
-} = require('../server/knx-protocol');
+} = require('../server/knx-protocol.ts');
 
 describe('KNXnet/IP: hdr', () => {
   it('builds a 6-byte header with protocol version 0x06 0x10', () => {
@@ -130,7 +130,7 @@ const {
   _FEATURE: FEATURE,
   _FEATURE_SVC: FEATURE_SVC,
   _PKT: PKT,
-} = require('../server/knx-usb');
+} = require('../server/knx-usb.ts');
 
 describe('USB HID: buildHidReports', () => {
   it('builds a single 64-byte report for small frames', () => {
@@ -257,7 +257,7 @@ const {
   _APCI: APCI,
   buildCEMI,
   encodeDpt,
-} = require('../server/knx-connection');
+} = require('../server/knx-connection.ts');
 
 describe('APDU: apduGroupRead', () => {
   it('builds a 2-byte GroupValue_Read APDU', () => {

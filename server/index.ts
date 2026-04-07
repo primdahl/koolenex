@@ -1,22 +1,21 @@
-'use strict';
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
-const { WebSocketServer } = require('ws');
-const path = require('path');
-const fs = require('fs');
-const db = require('./db.ts');
-const KnxBusManager = require('./knx-bus');
-const bus = new KnxBusManager();
+import express from 'express';
+import cors from 'cors';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import path from 'path';
+import fs from 'fs';
+import * as db from './db.ts';
+import KnxBusManager from './knx-bus.ts';
 
+const bus = new KnxBusManager();
 const PORT = process.env.PORT || 4000;
 
-async function start() {
+async function start(): Promise<void> {
   // Must init DB before routes can use it
   await db.init();
 
   // Lazy-load routes after DB is ready
-  const { router: routes } = require('./routes/index.ts');
+  const { router: routes } = await import('./routes/index.ts');
   routes.setBus(bus);
 
   const app = express();
@@ -25,10 +24,10 @@ async function start() {
   app.use('/api', routes);
 
   // Serve built frontend
-  const frontendDist = path.join(__dirname, '..', 'client', 'dist');
+  const frontendDist = path.join(process.cwd(), 'client', 'dist');
   if (fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
-    app.get('*', (req, res) =>
+    app.get('*', (_req, res) =>
       res.sendFile(path.join(frontendDist, 'index.html')),
     );
   }
@@ -44,14 +43,14 @@ async function start() {
   server.listen(PORT, () => {
     console.log(`\n  ⬡  koolenex`);
     console.log(
-      `  App:  http://localhost:${PORT}  (after: cd client && npm run build)`,
+      `  App:  http://localhost:${String(PORT)}  (after: cd client && npm run build)`,
     );
-    console.log(`  API:  http://localhost:${PORT}/api`);
+    console.log(`  API:  http://localhost:${String(PORT)}/api`);
     console.log(`  Dev:  run 'cd client && npx vite' in a second terminal\n`);
   });
 }
 
-start().catch((err) => {
+start().catch((err: unknown) => {
   console.error('Failed to start:', err);
   process.exit(1);
 });

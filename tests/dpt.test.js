@@ -16,7 +16,7 @@ const {
   buildCEMI,
   parseCEMI,
   MC,
-} = require('../server/knx-connection');
+} = require('../server/knx-connection.ts');
 
 const {
   writeKnxFloat16,

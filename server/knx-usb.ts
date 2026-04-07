@@ -1,4 +1,3 @@
-'use strict';
 /**
  * KNX USB transport — HID class interface to KNX USB Interface Devices.
  * Extends KnxConnection (shared protocol logic) with USB HID transport.
@@ -7,19 +6,72 @@
  * Uses node-hid for USB HID communication.
  */
 
-const fs = require('fs');
-const path = require('path');
-const { KnxConnection, parseCEMI, delay } = require('./knx-connection');
+import fs from 'fs';
+import path from 'path';
+import { createRequire } from 'module';
+import { KnxConnection, parseCEMI, delay } from './knx-connection.ts';
+
+// @ts-expect-error TS1470: import.meta is valid at runtime
+const require_ = createRequire(import.meta.url);
+
+// ── Interfaces ────────────────────────────────────────────────────────────────
+
+interface HidReport {
+  seq: number;
+  pktType: number;
+  dataLength: number;
+  data: Buffer;
+}
+
+interface TransferHeader {
+  protocolVersion: number;
+  headerLength: number;
+  bodyLength: number;
+  protocolId: number;
+  emiId: number;
+  mfrCode: number;
+}
+
+interface FeatureWaiter {
+  featureId: number;
+  resolve: (data: Buffer) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface HidDeviceInfo {
+  path?: string;
+  manufacturer?: string;
+  product?: string;
+  vendorId?: number;
+  productId?: number;
+  serialNumber?: string;
+  usagePage?: number;
+  usage?: number;
+  interface?: number;
+}
+
+interface HidDevice {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, cb: (...args: any[]) => void): void;
+  write(data: number[]): void;
+  close(): void;
+}
+
+interface NodeHid {
+  devices(): HidDeviceInfo[];
+  HID: new (path: string) => HidDevice;
+}
 
 // ── Known KNX USB interfaces (loaded from known_knx_usb.csv) ──────────────────
 // CSV format: VendorID,ProductID,Name
 // VendorID and ProductID are hex (e.g. 0x147B) or decimal.
 
-const _knownInterfaces = new Map(); // key: "vendorId:productId" → name
+const _knownInterfaces: Map<string, string> = new Map(); // key: "vendorId:productId" → name
 
-function loadKnownInterfaces() {
-  const csvPath = path.join(__dirname, '..', 'known_knx_usb.csv');
-  let raw;
+function loadKnownInterfaces(): void {
+  const csvPath = path.join(process.cwd(), 'known_knx_usb.csv');
+  let raw: string;
   try {
     raw = fs.readFileSync(csvPath, 'utf-8');
   } catch (_) {
@@ -37,12 +89,12 @@ function loadKnownInterfaces() {
     const parts = trimmed.split(',');
     if (parts.length < 2) continue;
     const vid = parseInt(
-      parts[0].trim(),
-      parts[0].trim().startsWith('0x') ? 16 : 10,
+      parts[0]!.trim(),
+      parts[0]!.trim().startsWith('0x') ? 16 : 10,
     );
     const pid = parseInt(
-      parts[1].trim(),
-      parts[1].trim().startsWith('0x') ? 16 : 10,
+      parts[1]!.trim(),
+      parts[1]!.trim().startsWith('0x') ? 16 : 10,
     );
     const name = (parts.slice(2).join(',') || '').trim();
     if (!isNaN(vid) && !isNaN(pid)) _knownInterfaces.set(`${vid}:${pid}`, name);
@@ -57,11 +109,11 @@ function loadKnownInterfaces() {
 
 loadKnownInterfaces();
 
-function isKnownKnxDevice(vendorId, productId) {
+function isKnownKnxDevice(vendorId: number, productId: number): boolean {
   return _knownInterfaces.has(`${vendorId}:${productId}`);
 }
 
-function knownKnxName(vendorId, productId) {
+function knownKnxName(vendorId: number, productId: number): string {
   return _knownInterfaces.get(`${vendorId}:${productId}`) || '';
 }
 
@@ -79,7 +131,7 @@ const EMI_ID = {
   EMI1: 0x01,
   EMI2: 0x02,
   COMMON: 0x03, // cEMI
-};
+} as const;
 
 // Device Feature Service Identifiers
 const FEATURE_SVC = {
@@ -87,7 +139,7 @@ const FEATURE_SVC = {
   RESPONSE: 0x02,
   SET: 0x03,
   INFO: 0x04,
-};
+} as const;
 
 // Device Feature Identifiers
 const FEATURE = {
@@ -96,7 +148,7 @@ const FEATURE = {
   BUS_STATUS: 0x03, // 1 bit
   MFR_CODE: 0x04, // 2 bytes
   ACTIVE_EMI: 0x05, // 1 byte
-};
+} as const;
 
 // Packet type flags (in PacketInfo low nibble)
 const PKT = {
@@ -104,21 +156,20 @@ const PKT = {
   START: 0x05, // start & partial (more to follow)
   PARTIAL: 0x04, // middle packet
   END: 0x06, // partial & end (last packet)
-};
+} as const;
 
 // ── HID Report building / parsing ──────────────────────────────────────────────
 
 /**
  * Build HID report(s) for a KNX USB Transfer Frame.
  * Returns an array of 64-byte Buffers (one per HID report).
- *
- * @param {number} protocolId - PROTO_KNX_TUNNEL or PROTO_BUS_FEATURE
- * @param {number} emiId - EMI_ID value (only for KNX tunnel)
- * @param {Buffer} body - KNX USB Transfer Protocol Body (EMI Message Code + data)
- * @param {number} mfrCode - manufacturer code (default 0x0000)
- * @returns {Buffer[]}
  */
-function buildHidReports(protocolId, emiId, body, mfrCode = 0x0000) {
+function buildHidReports(
+  protocolId: number,
+  emiId: number,
+  body: Buffer | null,
+  mfrCode: number = 0x0000,
+): Buffer[] {
   const bodyLen = body ? body.length : 0;
 
   // KNX USB Transfer Protocol Header (8 bytes)
@@ -135,7 +186,7 @@ function buildHidReports(protocolId, emiId, body, mfrCode = 0x0000) {
 
   // Split into HID reports (max 61 data bytes per report)
   const MAX_DATA = 61;
-  const reports = [];
+  const reports: Buffer[] = [];
 
   if (frame.length <= MAX_DATA) {
     // Single report: start + end
@@ -186,17 +237,17 @@ function buildHidReports(protocolId, emiId, body, mfrCode = 0x0000) {
  * Parse a received HID report.
  * Returns { seq, pktType, dataLength, data } or null on error.
  */
-function parseHidReport(buf) {
+function parseHidReport(buf: Buffer): HidReport | null {
   if (!buf || buf.length < 3) return null;
   // Some HID implementations include the Report ID byte, some don't
   let off = 0;
   if (buf[0] === REPORT_ID && buf.length >= 4) off = 1;
   else if (buf[0] !== REPORT_ID) off = 0; // no report ID prefix
 
-  const packetInfo = buf[off];
+  const packetInfo = buf[off]!;
   const seq = (packetInfo >> 4) & 0x0f;
   const pktType = packetInfo & 0x0f;
-  const dataLen = buf[off + 1];
+  const dataLen = buf[off + 1]!;
   const data = buf.slice(off + 2, off + 2 + dataLen);
 
   return { seq, pktType, dataLength: dataLen, data };
@@ -205,34 +256,43 @@ function parseHidReport(buf) {
 /**
  * Parse the KNX USB Transfer Protocol Header from the data portion of a start packet.
  */
-function parseTransferHeader(data) {
+function parseTransferHeader(data: Buffer): TransferHeader | null {
   if (!data || data.length < 8) return null;
   return {
-    protocolVersion: data[0],
-    headerLength: data[1],
+    protocolVersion: data[0]!,
+    headerLength: data[1]!,
     bodyLength: data.readUInt16BE(2),
-    protocolId: data[4],
-    emiId: data[5],
+    protocolId: data[4]!,
+    emiId: data[5]!,
     mfrCode: data.readUInt16BE(6),
   };
 }
 
 // ── Device Feature Service frame builders ──────────────────────────────────────
 
-function buildFeatureGet(featureId) {
+function buildFeatureGet(featureId: number): Buffer[] {
   // Body is just the feature identifier (1 byte)
   const body = Buffer.from([featureId]);
   return buildHidReports(PROTO_BUS_FEATURE, FEATURE_SVC.GET, body);
 }
 
-function buildFeatureSet(featureId, data) {
+function buildFeatureSet(featureId: number, data: Buffer): Buffer[] {
   const body = Buffer.concat([Buffer.from([featureId]), data]);
   return buildHidReports(PROTO_BUS_FEATURE, FEATURE_SVC.SET, body);
 }
 
 // ── KnxUsbConnection ───────────────────────────────────────────────────────────
 
-class KnxUsbConnection extends KnxConnection {
+class KnxUsbConnection extends (KnxConnection as typeof import('./knx-connection').KnxConnection) {
+  _device: HidDevice | null;
+  _devicePath: string | null;
+  _activeEmi: number;
+  _mfrCode: number;
+  _busActive: boolean;
+  _rxBuf: Buffer[] | null;
+  _rxExpected: number;
+  _featureWaiters: FeatureWaiter[];
+
   constructor() {
     super();
     this._device = null;
@@ -248,40 +308,59 @@ class KnxUsbConnection extends KnxConnection {
   /**
    * List available KNX USB HID devices.
    * Matches connected HID devices against known_knx_usb.csv (VendorID + ProductID).
-   * Returns [{ path, manufacturer, product, vendorId, productId, serialNumber, knxName }]
    */
-  static listDevices() {
-    let HID;
+  static listDevices(): {
+    path: string | undefined;
+    manufacturer: string;
+    product: string;
+    vendorId: number | undefined;
+    productId: number | undefined;
+    serialNumber: string;
+    knxName: string;
+  }[] {
+    let HID: NodeHid;
     try {
-      HID = require('node-hid');
+      HID = require_('node-hid') as NodeHid;
     } catch (_) {
       return [];
     }
 
     return HID.devices()
-      .filter((d) => isKnownKnxDevice(d.vendorId, d.productId))
-      .map((d) => ({
+      .filter((d: HidDeviceInfo) =>
+        isKnownKnxDevice(d.vendorId ?? 0, d.productId ?? 0),
+      )
+      .map((d: HidDeviceInfo) => ({
         path: d.path,
         manufacturer: d.manufacturer || '',
         product: d.product || '',
         vendorId: d.vendorId,
         productId: d.productId,
         serialNumber: d.serialNumber || '',
-        knxName: knownKnxName(d.vendorId, d.productId),
+        knxName: knownKnxName(d.vendorId ?? 0, d.productId ?? 0),
       }));
   }
 
   /**
    * List all HID devices without filtering (for discovery/debugging).
    */
-  static listAllHidDevices() {
-    let HID;
+  static listAllHidDevices(): {
+    path: string | undefined;
+    manufacturer: string;
+    product: string;
+    vendorId: number | undefined;
+    productId: number | undefined;
+    serialNumber: string;
+    usagePage: number | undefined;
+    usage: number | undefined;
+    interface: number | undefined;
+  }[] {
+    let HID: NodeHid;
     try {
-      HID = require('node-hid');
+      HID = require_('node-hid') as NodeHid;
     } catch (_) {
       return [];
     }
-    return HID.devices().map((d) => ({
+    return HID.devices().map((d: HidDeviceInfo) => ({
       path: d.path,
       manufacturer: d.manufacturer || '',
       product: d.product || '',
@@ -296,10 +375,14 @@ class KnxUsbConnection extends KnxConnection {
 
   // ── Connect ─────────────────────────────────────────────────────────────────
 
-  async connect(devicePath, _unused = null, timeoutMs = 5000) {
-    let HID;
+  async connect(
+    devicePath: string,
+    _unused: unknown = null,
+    timeoutMs: number = 5000,
+  ): Promise<{ path: string }> {
+    let HID: NodeHid;
     try {
-      HID = require('node-hid');
+      HID = require_('node-hid') as NodeHid;
     } catch (err) {
       throw new Error(
         'node-hid package not installed. Run: npm install node-hid',
@@ -311,8 +394,8 @@ class KnxUsbConnection extends KnxConnection {
     this._devicePath = devicePath;
 
     // Set up data reception
-    this._device.on('data', (buf) => this._onHidData(buf));
-    this._device.on('error', (err) => {
+    this._device.on('data', (buf: Buffer) => this._onHidData(buf));
+    this._device.on('error', (err: Error) => {
       console.error('[KNX-USB] HID error:', err.message);
       this.connected = false;
       this.emit('error', err);
@@ -336,20 +419,20 @@ class KnxUsbConnection extends KnxConnection {
     return { path: devicePath };
   }
 
-  async _negotiateEmi(timeoutMs) {
+  async _negotiateEmi(timeoutMs: number): Promise<void> {
     // Step 1: Get supported EMI types
     const supported = await this._featureGet(FEATURE.SUPPORTED_EMI, timeoutMs);
     if (!supported || supported.length < 2) {
       throw new Error('Failed to read supported EMI types from USB device');
     }
 
-    const emiBits = (supported[0] << 8) | supported[1];
+    const emiBits = (supported[0]! << 8) | supported[1]!;
     console.log(
       `[KNX-USB] Supported EMI bitmask: 0x${emiBits.toString(16).padStart(4, '0')}`,
     );
 
     // Prefer cEMI (bit 2), then EMI2 (bit 1), then EMI1 (bit 0)
-    let targetEmi;
+    let targetEmi: number;
     if (emiBits & 0x04) targetEmi = EMI_ID.COMMON;
     else if (emiBits & 0x02) targetEmi = EMI_ID.EMI2;
     else if (emiBits & 0x01) targetEmi = EMI_ID.EMI1;
@@ -357,7 +440,8 @@ class KnxUsbConnection extends KnxConnection {
 
     // Step 2: Check current active EMI
     const activeRaw = await this._featureGet(FEATURE.ACTIVE_EMI, timeoutMs);
-    const currentActive = activeRaw && activeRaw.length >= 1 ? activeRaw[0] : 0;
+    const currentActive =
+      activeRaw && activeRaw.length >= 1 ? activeRaw[0]! : 0;
 
     // Step 3: Set active EMI if different
     if (currentActive !== targetEmi) {
@@ -371,7 +455,7 @@ class KnxUsbConnection extends KnxConnection {
     this._activeEmi = targetEmi;
   }
 
-  async _checkBusStatus(timeoutMs) {
+  async _checkBusStatus(timeoutMs: number): Promise<void> {
     try {
       const status = await this._featureGet(FEATURE.BUS_STATUS, timeoutMs);
       this._busActive = status && status.length >= 1 && status[0] === 0x01;
@@ -382,18 +466,24 @@ class KnxUsbConnection extends KnxConnection {
 
   // ── Device Feature Get/Set ──────────────────────────────────────────────────
 
-  _featureGet(featureId, timeoutMs = 2000) {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this._featureWaiters = this._featureWaiters.filter((w) => w !== waiter);
-        reject(
-          new Error(
-            `Feature Get timeout for feature 0x${featureId.toString(16)}`,
-          ),
-        );
-      }, timeoutMs);
+  _featureGet(featureId: number, timeoutMs: number = 2000): Promise<Buffer> {
+    return new Promise<Buffer>((resolve, reject) => {
+      const waiter: FeatureWaiter = {
+        featureId,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this._featureWaiters = this._featureWaiters.filter(
+            (w) => w !== waiter,
+          );
+          reject(
+            new Error(
+              `Feature Get timeout for feature 0x${featureId.toString(16)}`,
+            ),
+          );
+        }, timeoutMs),
+      };
 
-      const waiter = { featureId, resolve, reject, timer };
       this._featureWaiters.push(waiter);
 
       const reports = buildFeatureGet(featureId);
@@ -401,18 +491,18 @@ class KnxUsbConnection extends KnxConnection {
     });
   }
 
-  async _featureSet(featureId, data) {
+  async _featureSet(featureId: number, data: Buffer): Promise<void> {
     const reports = buildFeatureSet(featureId, data);
     for (const report of reports) this._sendReport(report);
     // Feature Set has no confirmation per spec
   }
 
-  _resolveFeatureWaiter(featureId, data) {
+  _resolveFeatureWaiter(featureId: number, data: Buffer): void {
     const idx = this._featureWaiters.findIndex(
       (w) => w.featureId === featureId,
     );
     if (idx >= 0) {
-      const waiter = this._featureWaiters.splice(idx, 1)[0];
+      const waiter = this._featureWaiters.splice(idx, 1)[0]!;
       clearTimeout(waiter.timer);
       waiter.resolve(data);
     }
@@ -420,7 +510,7 @@ class KnxUsbConnection extends KnxConnection {
 
   // ── Send CEMI via USB HID ─────────────────────────────────────────────────────
 
-  sendCEMI(cemi) {
+  sendCEMI(cemi: Buffer): Promise<void> {
     if (!this._device) return Promise.reject(new Error('USB device not open'));
     // Wrap cEMI in KNX USB Transfer Protocol with KNX Tunnel protocol ID
     const reports = buildHidReports(
@@ -434,7 +524,7 @@ class KnxUsbConnection extends KnxConnection {
     return Promise.resolve();
   }
 
-  _sendReport(report) {
+  _sendReport(report: Buffer): void {
     if (!this._device) return;
     // node-hid write() expects the report data; on some platforms the first byte
     // must be the report ID, on others it's prepended automatically.
@@ -445,7 +535,7 @@ class KnxUsbConnection extends KnxConnection {
 
   // ── Receive HID data ──────────────────────────────────────────────────────────
 
-  _onHidData(buf) {
+  _onHidData(buf: Buffer): void {
     const report = parseHidReport(Buffer.from(buf));
     if (!report) return;
 
@@ -470,7 +560,7 @@ class KnxUsbConnection extends KnxConnection {
     }
   }
 
-  _processTransferFrame(data) {
+  _processTransferFrame(data: Buffer): void {
     const hdr = parseTransferHeader(data);
     if (!hdr) return;
 
@@ -486,7 +576,7 @@ class KnxUsbConnection extends KnxConnection {
     }
   }
 
-  _onTunnelFrame(body, _emiId) {
+  _onTunnelFrame(body: Buffer, _emiId: number): void {
     if (!body || body.length === 0) return;
 
     // For cEMI: body starts with EMI Message Code, then the cEMI frame
@@ -495,10 +585,10 @@ class KnxUsbConnection extends KnxConnection {
     if (cemi) this._onCEMI(cemi);
   }
 
-  _onFeatureFrame(body, svcId) {
+  _onFeatureFrame(body: Buffer, svcId: number): void {
     if (!body || body.length < 1) return;
 
-    const featureId = body[0];
+    const featureId = body[0]!;
     const featureData = body.slice(1);
 
     if (svcId === FEATURE_SVC.RESPONSE) {
@@ -521,7 +611,7 @@ class KnxUsbConnection extends KnxConnection {
 
   // ── Disconnect ────────────────────────────────────────────────────────────────
 
-  disconnect() {
+  disconnect(): void {
     if (this._device) {
       try {
         this._device.close();
@@ -538,7 +628,14 @@ class KnxUsbConnection extends KnxConnection {
     this._featureWaiters = [];
   }
 
-  status() {
+  status(): {
+    connected: boolean;
+    type: string;
+    path: string | null;
+    busActive: boolean;
+    activeEmi: number;
+    hasLib: boolean;
+  } {
     return {
       connected: this.connected,
       type: 'usb',
@@ -550,17 +647,19 @@ class KnxUsbConnection extends KnxConnection {
   }
 }
 
-module.exports = { KnxUsbConnection };
+export { KnxUsbConnection };
 
 // Export pure helpers for testing
-module.exports._buildHidReports = buildHidReports;
-module.exports._parseHidReport = parseHidReport;
-module.exports._parseTransferHeader = parseTransferHeader;
-module.exports._buildFeatureGet = buildFeatureGet;
-module.exports._buildFeatureSet = buildFeatureSet;
-module.exports._PROTO_KNX_TUNNEL = PROTO_KNX_TUNNEL;
-module.exports._PROTO_BUS_FEATURE = PROTO_BUS_FEATURE;
-module.exports._EMI_ID = EMI_ID;
-module.exports._FEATURE = FEATURE;
-module.exports._PKT = PKT;
-module.exports._FEATURE_SVC = FEATURE_SVC;
+export {
+  buildHidReports as _buildHidReports,
+  parseHidReport as _parseHidReport,
+  parseTransferHeader as _parseTransferHeader,
+  buildFeatureGet as _buildFeatureGet,
+  buildFeatureSet as _buildFeatureSet,
+  PROTO_KNX_TUNNEL as _PROTO_KNX_TUNNEL,
+  PROTO_BUS_FEATURE as _PROTO_BUS_FEATURE,
+  EMI_ID as _EMI_ID,
+  FEATURE as _FEATURE,
+  PKT as _PKT,
+  FEATURE_SVC as _FEATURE_SVC,
+};
