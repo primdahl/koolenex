@@ -460,7 +460,7 @@ const {
   looksEncrypted,
   inferType,
   buildFlags,
-} = require('../server/ets-parser');
+} = require('../server/ets-parser.ts');
 
 describe('looksEncrypted', () => {
   it('returns false for UTF-8 BOM + XML', () => {

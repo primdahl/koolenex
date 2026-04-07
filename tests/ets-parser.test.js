@@ -1,6 +1,6 @@
 const { describe, it, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeText, interpolate } = require('../server/ets-parser');
+const { sanitizeText, interpolate } = require('../server/ets-parser.ts');
 
 describe('sanitizeText()', () => {
   test('returns empty string for null/undefined', () => {

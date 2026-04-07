@@ -19,7 +19,7 @@ if (!fs.existsSync(SMOKE_PROJECT)) {
   return;
 }
 
-const { parseKnxproj } = require('../server/ets-parser');
+const { parseKnxproj } = require('../server/ets-parser.ts');
 
 // ── Helpers (replicate client logic) ─────────────────────────────────────────
 

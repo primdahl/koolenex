@@ -18,7 +18,7 @@ if (!fs.existsSync(SMOKE_PROJECT)) {
   return;
 }
 
-const { parseKnxproj } = require('../server/ets-parser');
+const { parseKnxproj } = require('../server/ets-parser.ts');
 
 let server, baseUrl, db, parsed;
 

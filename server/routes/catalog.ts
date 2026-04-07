@@ -4,7 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import * as db from '../db.ts';
-import { parseKnxproj } from '../ets-parser.js';
+import { parseKnxproj } from '../ets-parser.ts';
 import { APPS_DIR } from './shared.ts';
 
 const router = express.Router();
@@ -65,7 +65,10 @@ router.post(
 
     let parsed: Record<string, unknown>;
     try {
-      parsed = parseKnxproj(req.file.buffer, null) as Record<string, unknown>;
+      parsed = parseKnxproj(req.file.buffer, null) as unknown as Record<
+        string,
+        unknown
+      >;
     } catch (err) {
       console.error('.knxprod parse error:', err);
       res
