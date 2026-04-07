@@ -1,5 +1,27 @@
 // Core entity types shared between server and client.
-// These mirror the SQLite schema defined in server/db.js.
+// These mirror the SQLite schema defined in server/db.ts.
+//
+// SQLite has no native boolean type — boolean columns are stored as 0 | 1.
+// We use `SqliteBool` to make the intent clear while matching the runtime type.
+export type SqliteBool = 0 | 1;
+
+export type DeviceType = 'actuator' | 'sensor' | 'router' | 'generic';
+export type DeviceStatus =
+  | 'programmed'
+  | 'modified'
+  | 'unassigned'
+  | 'deleted'
+  | 'error';
+export type ComObjectDirection = 'input' | 'output' | 'both';
+export type SpaceType =
+  | 'Building'
+  | 'Floor'
+  | 'Stairway'
+  | 'Corridor'
+  | 'Room'
+  | 'DistributionBoard'
+  | 'Undefined';
+export type Medium = 'TP' | 'RF' | 'IP' | 'PL';
 
 export interface Project {
   id: number;
@@ -27,9 +49,9 @@ export interface Device {
   line: number;
   area_name: string;
   line_name: string;
-  medium: string;
-  device_type: string;
-  status: string;
+  medium: Medium;
+  device_type: DeviceType;
+  status: DeviceStatus;
   last_modified: string;
   last_download: string;
   app_number: string;
@@ -41,9 +63,9 @@ export interface Device {
   model_translations: string;
   bus_current: number;
   width_mm: number;
-  is_power_supply: number;
-  is_coupler: number;
-  is_rail_mounted: number;
+  is_power_supply: SqliteBool;
+  is_coupler: SqliteBool;
+  is_rail_mounted: SqliteBool;
   installation_hints: string;
   floor_x: number;
   floor_y: number;
@@ -73,7 +95,7 @@ export interface ComObject {
   dpt: string;
   object_size: string;
   flags: string;
-  direction: string;
+  direction: ComObjectDirection;
   ga_address: string;
   ga_send: string;
   ga_receive: string;
@@ -88,7 +110,7 @@ export interface Space {
   id: number;
   project_id: number;
   name: string;
-  type: string;
+  type: SpaceType;
   parent_id: number | null;
   sort_order: number;
   usage_id: string;
@@ -100,7 +122,7 @@ export interface Topology {
   area: number;
   line: number | null;
   name: string;
-  medium: string;
+  medium: Medium;
 }
 
 export interface BusTelegram {
@@ -145,9 +167,9 @@ export interface CatalogItem {
   model: string;
   bus_current: number;
   width_mm: number;
-  is_power_supply: number;
-  is_coupler: number;
-  is_rail_mounted: number;
+  is_power_supply: SqliteBool;
+  is_coupler: SqliteBool;
+  is_rail_mounted: SqliteBool;
 }
 
 export interface AuditLogEntry {
